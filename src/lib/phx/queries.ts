@@ -53,9 +53,14 @@ export type PhxStoreSnapshot = {
 };
 
 /**
- * Returns the latest snapshot for every active store. When `range` is passed,
- * only considers snapshots whose `scrape_date` is in [range.from, range.to].
- * Stores with no snapshot in that window get `snapshot: null`.
+ * Returns the snapshot covering the most recent PHX reporting period for
+ * every active store. "Most recent" is decided by `range_to` (the snapshot's
+ * period end date) — not `scraped_at` — so backfilling a historical month
+ * today doesn't hijack the default view.
+ *
+ * When `range` is passed, only snapshots whose period is contained in
+ * [range.from, range.to] are considered. Stores with no matching snapshot
+ * get `snapshot: null`.
  */
 export async function loadLatestSnapshots(range?: {
   from: string;
@@ -71,14 +76,15 @@ export async function loadLatestSnapshots(range?: {
 
   const results: PhxStoreSnapshot[] = [];
   for (const s of stores ?? []) {
-    let q = sb
-      .from("phx_summary_snapshots")
-      .select("*")
-      .eq("store_id", s.id);
+    let q = sb.from("phx_summary_snapshots").select("*").eq("store_id", s.id);
     if (range) {
-      q = q.gte("scrape_date", range.from).lte("scrape_date", range.to);
+      // Period must be fully within the filter window.
+      q = q.gte("range_from", range.from).lte("range_to", range.to);
     }
-    const { data } = await q.order("scraped_at", { ascending: false }).limit(1);
+    const { data } = await q
+      .order("range_to", { ascending: false })
+      .order("scraped_at", { ascending: false })
+      .limit(1);
     results.push({
       store_id: s.id,
       store_name: s.name,
