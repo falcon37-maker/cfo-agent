@@ -14,10 +14,15 @@ import {
   Calculator,
 } from "lucide-react";
 
-const NAV = [
+const NAV: Array<{
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  badge?: string;
+}> = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pnl", label: "P&L", icon: LineChart },
-  { href: "/subscriptions", label: "Subscriptions", icon: Repeat, badge: "47" },
+  { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
   { href: "/cash", label: "Cash Flow", icon: Banknote },
   { href: "/accounting", label: "Accounting", icon: FileSpreadsheet },
   { href: "/calculator", label: "Calculator", icon: Calculator },
@@ -72,8 +77,8 @@ export function Sidebar() {
         <div className="agent-card">
           <div className="agent-pulse"><span /></div>
           <div>
-            <div className="agent-title">Agent is watching</div>
-            <div className="agent-sub">3 flags today · auto-sync 2m ago</div>
+            <div className="agent-title">All systems normal</div>
+            <div className="agent-sub">Phase 1 · manual sync</div>
           </div>
         </div>
         <div className="user-row">

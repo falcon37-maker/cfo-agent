@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { Calendar, RefreshCw, Share2 } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { RefreshCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 
 const TITLES: Record<string, { title: string; crumb: string; sub?: string }> = {
@@ -23,6 +23,7 @@ function titleFor(pathname: string) {
 
 export function TopBar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { title, crumb } = titleFor(pathname);
   const now = new Date();
   const dateSub = new Intl.DateTimeFormat("en-US", {
@@ -51,16 +52,15 @@ export function TopBar() {
         </h1>
       </div>
       <div className="topbar-right">
-        <div className="date-pill">
-          <Calendar size={13} />
-          <span>Last 30 days</span>
-        </div>
         <ThemeToggle />
-        <button type="button" className="icon-btn" aria-label="Refresh">
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Refresh data"
+          title="Refresh"
+          onClick={() => router.refresh()}
+        >
           <RefreshCw size={14} />
-        </button>
-        <button type="button" className="icon-btn" aria-label="Share">
-          <Share2 size={14} />
         </button>
       </div>
     </header>
