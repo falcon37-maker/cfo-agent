@@ -12,22 +12,31 @@ import {
   Search,
   LogOut,
   Calculator,
+  CheckSquare,
+  Megaphone,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
+import type { Role } from "@/lib/auth/roles";
 
-const NAV: Array<{
+type NavItem = {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
   badge?: string;
-}> = [
+  /** If set, only these roles see the item. Default: visible to all. */
+  roles?: Role[];
+};
+
+const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pnl", label: "P&L", icon: LineChart },
   { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
   { href: "/cash", label: "Cash Flow", icon: Banknote },
   { href: "/accounting", label: "Accounting", icon: FileSpreadsheet },
   { href: "/calculator", label: "Calculator", icon: Calculator },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/cogs", label: "Log COGS", icon: CheckSquare },
+  { href: "/ads", label: "Log Ad Spend", icon: Megaphone, roles: ["admin"] },
+  { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -46,11 +55,16 @@ function initialsFromEmail(email: string | null): string {
 export function Sidebar({
   userEmail,
   userId: _userId,
+  role,
 }: {
   userEmail: string | null;
   userId: string | null;
+  role: Role;
 }) {
   const pathname = usePathname();
+  const visibleNav = NAV.filter(
+    (n) => !n.roles || n.roles.includes(role),
+  );
 
   return (
     <aside className="sidebar">
@@ -72,7 +86,7 @@ export function Sidebar({
 
       <div className="sidebar-section-label">Workspace</div>
       <nav className="sidebar-nav">
-        {NAV.map(({ href, label, icon: Icon, badge }) => {
+        {visibleNav.map(({ href, label, icon: Icon, badge }) => {
           const active = isActive(pathname, href);
           return (
             <Link
