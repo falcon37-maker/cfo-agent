@@ -53,45 +53,47 @@ export type PhxStoreSnapshot = {
 };
 
 /**
- * Returns the snapshot covering the most recent PHX reporting period for
- * every active store. "Most recent" is decided by `range_to` (the snapshot's
- * period end date) — not `scraped_at` — so backfilling a historical month
- * today doesn't hijack the default view.
+ * Returns the snapshot covering the most recent PHX reporting period.
+ * "Most recent" is decided by `range_to` (the snapshot's period end date),
+ * not `scraped_at` — so backfilling a historical month today doesn't hijack
+ * the default view.
+ *
+ * Phoenix only exposes portfolio-level aggregates, so snapshots are all
+ * tagged with store_id='PORTFOLIO' — we don't iterate per individual store.
  *
  * When `range` is passed, only snapshots whose period is contained in
- * [range.from, range.to] are considered. Stores with no matching snapshot
- * get `snapshot: null`.
+ * [range.from, range.to] are considered.
  */
-export async function loadLatestSnapshots(range?: {
+export async function loadLatestPortfolioSnapshot(range?: {
   from: string;
   to: string;
-}): Promise<PhxStoreSnapshot[]> {
+}): Promise<PhxSnapshot | null> {
   const sb = supabaseAdmin();
-  const { data: stores, error: sErr } = await sb
-    .from("stores")
-    .select("id, name")
-    .eq("is_active", true)
-    .order("id");
-  if (sErr) throw new Error(`stores: ${sErr.message}`);
-
-  const results: PhxStoreSnapshot[] = [];
-  for (const s of stores ?? []) {
-    let q = sb.from("phx_summary_snapshots").select("*").eq("store_id", s.id);
-    if (range) {
-      // Period must be fully within the filter window.
-      q = q.gte("range_from", range.from).lte("range_to", range.to);
-    }
-    const { data } = await q
-      .order("range_to", { ascending: false })
-      .order("scraped_at", { ascending: false })
-      .limit(1);
-    results.push({
-      store_id: s.id,
-      store_name: s.name,
-      snapshot: (data?.[0] as PhxSnapshot) ?? null,
-    });
+  let q = sb
+    .from("phx_summary_snapshots")
+    .select("*")
+    .eq("store_id", "PORTFOLIO");
+  if (range) {
+    q = q.gte("range_from", range.from).lte("range_to", range.to);
   }
-  return results;
+  const { data } = await q
+    .order("range_to", { ascending: false })
+    .order("scraped_at", { ascending: false })
+    .limit(1);
+  return (data?.[0] as PhxSnapshot) ?? null;
+}
+
+/** All portfolio snapshots ordered newest period first (for a history grid). */
+export async function loadPortfolioSnapshots(limit = 24): Promise<PhxSnapshot[]> {
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("phx_summary_snapshots")
+    .select("*")
+    .eq("store_id", "PORTFOLIO")
+    .order("range_to", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`loadPortfolioSnapshots: ${error.message}`);
+  return (data ?? []) as PhxSnapshot[];
 }
 
 /** Aggregate summed numeric fields across multiple snapshots. */

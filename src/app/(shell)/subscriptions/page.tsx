@@ -1,19 +1,17 @@
 import Link from "next/link";
 import { Users, UserMinus, UserX, Target, CreditCard } from "lucide-react";
 import {
-  loadLatestSnapshots,
-  aggregateSnapshots,
+  loadLatestPortfolioSnapshot,
+  loadPortfolioSnapshots,
   type PhxSnapshot,
-  type PhxStoreSnapshot,
 } from "@/lib/phx/queries";
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
-import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 export const dynamic = "force-dynamic";
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function qs(params: Record<string, string>): string {
   const sp = new URLSearchParams();
@@ -33,37 +31,19 @@ function relTime(iso: string): string {
 export default async function SubscriptionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ store?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string }>;
 }) {
   const params = await searchParams;
-  const storeFilter = (params.store ?? "all").toLowerCase();
-
   const customFrom = DATE_RE.test(params.from ?? "") ? params.from! : undefined;
   const customTo = DATE_RE.test(params.to ?? "") ? params.to! : undefined;
   const hasCustom = Boolean(customFrom && customTo);
 
-  const perStore = await loadLatestSnapshots(
-    hasCustom ? { from: customFrom!, to: customTo! } : undefined,
-  );
-  const withData = perStore.filter((p) => p.snapshot != null);
-
-  let activeSnapshot: PhxSnapshot | null = null;
-  let activeStoreLabel = "All stores";
-
-  if (storeFilter === "all") {
-    activeSnapshot = aggregateSnapshots(
-      withData.map((p) => p.snapshot as PhxSnapshot),
-    );
-  } else {
-    const match = perStore.find((p) => p.store_id.toLowerCase() === storeFilter);
-    activeSnapshot = match?.snapshot ?? null;
-    activeStoreLabel = match?.store_id ?? storeFilter.toUpperCase();
-  }
-
-  const storeOptions = [
-    { id: "all", label: "All" },
-    ...perStore.map((p) => ({ id: p.store_id.toLowerCase(), label: p.store_id })),
-  ];
+  const [snapshot, history] = await Promise.all([
+    loadLatestPortfolioSnapshot(
+      hasCustom ? { from: customFrom!, to: customTo! } : undefined,
+    ),
+    loadPortfolioSnapshots(12),
+  ]);
 
   return (
     <>
@@ -74,58 +54,45 @@ export default async function SubscriptionsPage({
             <span className="phx-tag">PHX</span>
           </h2>
           <div className="section-sub">
-            {activeStoreLabel} ·{" "}
-            {activeSnapshot
-              ? `as of ${relTime(activeSnapshot.scraped_at)}${activeSnapshot.range_from ? ` · range ${fmtDate(activeSnapshot.range_from)} → ${fmtDate(activeSnapshot.range_to ?? activeSnapshot.range_from)}` : ""}`
-              : "no snapshots yet — sync via the Chrome extension"}
+            Portfolio · all Falcon 37 stores aggregated ·{" "}
+            {snapshot
+              ? `period ${fmtDate(snapshot.range_from!)} → ${fmtDate(snapshot.range_to!)} · scraped ${relTime(snapshot.scraped_at)}`
+              : hasCustom
+                ? "no snapshot in this range"
+                : "no snapshots yet — sync via the Chrome extension"}
           </div>
         </div>
         <div className="pnl-controls">
-          <div className="seg" role="tablist" aria-label="Store">
-            {storeOptions.map((s) => (
-              <SegLink
-                key={s.id}
-                active={s.id === storeFilter}
-                href={`/subscriptions${qs({
-                  store: s.id,
-                  ...(hasCustom ? { from: customFrom!, to: customTo! } : {}),
-                })}`}
-              >
-                {s.label}
-              </SegLink>
-            ))}
-          </div>
           <DateRangeForm
             action="/subscriptions"
             from={customFrom}
             to={customTo}
-            hidden={{ store: storeFilter }}
           />
         </div>
       </div>
 
-      {activeSnapshot == null ? (
+      {snapshot == null ? (
         <EmptyState />
       ) : (
         <>
           <section className="kpi-row kpi-5">
             <KpiCard
               label="Active Subscribers"
-              value={fmtInt(activeSnapshot.active_subscribers)}
+              value={fmtInt(snapshot.active_subscribers)}
               delta={null}
               spark={[]}
               icon={<Users size={14} strokeWidth={1.75} />}
             />
             <KpiCard
               label="In Salvage"
-              value={fmtInt(activeSnapshot.subscribers_in_salvage)}
+              value={fmtInt(snapshot.subscribers_in_salvage)}
               delta={null}
               spark={[]}
               icon={<UserMinus size={14} strokeWidth={1.75} />}
             />
             <KpiCard
               label="Cancelled (lifetime)"
-              value={fmtInt(activeSnapshot.cancelled_subscribers)}
+              value={fmtInt(snapshot.cancelled_subscribers)}
               delta={null}
               spark={[]}
               icon={<UserX size={14} strokeWidth={1.75} />}
@@ -133,8 +100,8 @@ export default async function SubscriptionsPage({
             <KpiCard
               label="Target CAC"
               value={
-                activeSnapshot.target_cac != null
-                  ? fmtMoney(activeSnapshot.target_cac)
+                snapshot.target_cac != null
+                  ? fmtMoney(snapshot.target_cac)
                   : "—"
               }
               delta={null}
@@ -143,18 +110,16 @@ export default async function SubscriptionsPage({
             />
             <KpiCard
               label="Subs to bill"
-              value={fmtInt(activeSnapshot.subscriptions_to_bill)}
+              value={fmtInt(snapshot.subscriptions_to_bill)}
               delta={null}
               spark={[]}
               icon={<CreditCard size={14} strokeWidth={1.75} />}
             />
           </section>
 
-          <OrderMix snapshot={activeSnapshot} />
-          <RefundSummary snapshot={activeSnapshot} />
-
-          <PerStoreGrid rows={perStore} />
-
+          <OrderMix snapshot={snapshot} />
+          <RefundSummary snapshot={snapshot} />
+          {history.length > 1 ? <PeriodHistory snapshots={history} /> : null}
           <WaveBStub />
         </>
       )}
@@ -204,7 +169,8 @@ function EmptyState() {
         >
           app1.phoenixcrm.io/app/dashboard
         </code>
-        , pick one store in the filter, and hit Sync Now.
+        , set a Date Range, and hit Sync Now. Portfolio-level aggregates land
+        in <code>phx_summary_snapshots</code>.
       </div>
     </div>
   );
@@ -343,55 +309,44 @@ function RefundSummary({ snapshot }: { snapshot: PhxSnapshot }) {
   );
 }
 
-function PerStoreGrid({ rows }: { rows: PhxStoreSnapshot[] }) {
-  if (rows.length === 0) return null;
-
+function PeriodHistory({ snapshots }: { snapshots: PhxSnapshot[] }) {
   return (
-    <div className="card">
+    <div className="card table-card">
       <div className="card-head">
         <div>
-          <div className="card-title">Per store</div>
-          <div className="card-sub">Latest snapshot per connected store</div>
+          <div className="card-title">Snapshot history</div>
+          <div className="card-sub">
+            One row per PHX reporting period, newest first
+          </div>
         </div>
       </div>
       <div className="table-wrap">
         <table className="pnl-table">
           <thead>
             <tr>
-              <th>Store</th>
+              <th>Period</th>
               <th className="num">Active</th>
               <th className="num">Salvage</th>
               <th className="num">Cancelled</th>
-              <th className="num">Subs to bill</th>
-              <th className="num">CAC</th>
-              <th className="num">Last sync</th>
+              <th className="num">Txns</th>
+              <th className="num">Refund $</th>
+              <th className="num">Scraped</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
-              const s = r.snapshot;
-              return (
-                <tr key={r.store_id}>
-                  <td>{r.store_id}</td>
-                  <td className="num">{s ? fmtInt(s.active_subscribers) : "—"}</td>
-                  <td className="num muted">
-                    {s ? fmtInt(s.subscribers_in_salvage) : "—"}
-                  </td>
-                  <td className="num muted">
-                    {s ? fmtInt(s.cancelled_subscribers) : "—"}
-                  </td>
-                  <td className="num muted">
-                    {s ? fmtInt(s.subscriptions_to_bill) : "—"}
-                  </td>
-                  <td className="num muted">
-                    {s?.target_cac != null ? fmtMoney(s.target_cac) : "—"}
-                  </td>
-                  <td className="num muted">
-                    {s ? relTime(s.scraped_at) : "never"}
-                  </td>
-                </tr>
-              );
-            })}
+            {snapshots.map((s) => (
+              <tr key={`${s.range_from}-${s.range_to}`}>
+                <td>
+                  {fmtDate(s.range_from!)} → {fmtDate(s.range_to!)}
+                </td>
+                <td className="num">{fmtInt(s.active_subscribers)}</td>
+                <td className="num muted">{fmtInt(s.subscribers_in_salvage)}</td>
+                <td className="num muted">{fmtInt(s.cancelled_subscribers)}</td>
+                <td className="num muted">{fmtInt(s.total_transactions_mtd)}</td>
+                <td className="num muted">{fmtMoney(s.refund_total)}</td>
+                <td className="num muted">{relTime(s.scraped_at)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -420,7 +375,7 @@ function WaveBStub() {
       <div style={{ color: "var(--text-dim)", lineHeight: 1.5 }}>
         Retention curve, cohort heatmap, new-vs-cancelled flow, and LTV/CAC
         require per-subscriber data from the PHX customer list page. Those
-        parsers ship once you grab inspect screenshots of the PHX subscribers
+        parsers ship once we grab inspect screenshots of the PHX subscribers
         and rebill transactions pages.
       </div>
     </div>
