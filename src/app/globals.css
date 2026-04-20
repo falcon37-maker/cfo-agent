@@ -845,6 +845,103 @@ kbd {
   font-weight: 500;
 }
 
+/* ═══ Login ═══ */
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 24px 22px;
+  box-shadow: var(--shadow);
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.login-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.login-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.login-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.login-field input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 120ms, background 120ms;
+}
+.login-field input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+.login-error {
+  font-size: 12px;
+  color: var(--negative);
+  background: var(--negative-bg);
+  border: 1px solid var(--negative-bg);
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+.login-submit {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  font-size: 13px;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.login-submit:hover {
+  background: var(--accent-strong);
+}
+.login-foot {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
 /* ═══ Settings ═══ */
 .settings-shell {
   display: grid;

@@ -2,43 +2,36 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import {
-  isCogsAuthed,
-  setCogsCookie,
-  clearCogsCookie,
-  verifyPassword,
-} from "@/lib/auth/cogs";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-export async function loginAction(formData: FormData) {
-  const password = String(formData.get("password") ?? "");
-  if (!verifyPassword(password)) {
-    redirect("/cogs?err=bad");
-  }
-  await setCogsCookie();
-  redirect("/cogs");
-}
-
-export async function logoutAction() {
-  await clearCogsCookie();
-  redirect("/cogs");
-}
-
+/**
+ * Manual daily-COGS submission. Middleware guarantees the user is logged in
+ * before this action can fire, but we re-fetch the session defensively in
+ * case the cookie expired between navigation and the form post.
+ */
 export async function submitCogsAction(formData: FormData) {
-  if (!(await isCogsAuthed())) {
-    redirect("/cogs");
-  }
+  const auth = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await auth.auth.getUser();
+  if (!user) redirect("/login?next=/cogs");
 
   const storeId = String(formData.get("store") ?? "").toUpperCase();
   const date = String(formData.get("date") ?? "");
-  const cogsRaw = String(formData.get("cogs") ?? "");
-  const cogs = Number(cogsRaw);
+  const cogs = Number(String(formData.get("cogs") ?? ""));
 
-  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(cogs) || cogs < 0) {
+  if (
+    !storeId ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !Number.isFinite(cogs) ||
+    cogs < 0
+  ) {
     redirect("/cogs?err=input");
   }
 
   const sb = supabaseAdmin();
+  const now = new Date().toISOString();
 
   // Pull existing daily_pnl row (if any) so we preserve revenue/fees/ad_spend
   // and recompute derived profit fields from the new COGS.
@@ -77,7 +70,7 @@ export async function submitCogsAction(formData: FormData) {
       net_profit: round2(netProfit),
       margin_pct: round2(marginPct),
       order_count: orderCount,
-      computed_at: new Date().toISOString(),
+      computed_at: now,
     },
     { onConflict: "store_id,date" },
   );
@@ -87,12 +80,14 @@ export async function submitCogsAction(formData: FormData) {
     store_id: storeId,
     date,
     cogs: round2(cogs),
-    submitted_by: "lara",
+    submitted_by: user.email ?? user.id,
   });
   if (logErr) redirect("/cogs?err=db");
 
   revalidatePath("/cogs");
-  redirect(`/cogs?ok=${encodeURIComponent(`${storeId} · ${date} · $${cogs.toFixed(2)}`)}`);
+  redirect(
+    `/cogs?ok=${encodeURIComponent(`${storeId} · ${date} · $${cogs.toFixed(2)}`)}`,
+  );
 }
 
 function round2(n: number): number {

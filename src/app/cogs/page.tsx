@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { isCogsAuthed } from "@/lib/auth/cogs";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fmtDate, fmtMoney } from "@/lib/format";
-import { loginAction, logoutAction, submitCogsAction } from "./actions";
+import { signOutAction } from "@/app/login/actions";
+import { submitCogsAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,79 +44,45 @@ export default async function CogsPage({
   searchParams: Promise<{ err?: string; ok?: string }>;
 }) {
   const params = await searchParams;
-  const authed = await isCogsAuthed();
 
-  return (
-    <main className="mx-auto min-h-screen w-full max-w-md px-4 py-6 sm:py-10">
-      <header className="mb-6">
-        <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-          Falcon 37
-        </div>
-        <h1 className="mt-1 text-2xl font-semibold">COGS Entry</h1>
-      </header>
+  const auth = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await auth.auth.getUser();
 
-      {!authed ? (
-        <LoginPanel err={params.err} />
-      ) : (
-        <AuthedPanel okMessage={params.ok} errMessage={params.err} />
-      )}
-    </main>
-  );
-}
-
-function LoginPanel({ err }: { err?: string }) {
-  return (
-    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Enter the shared password to access the COGS entry form.
-      </p>
-      <form action={loginAction} className="mt-4 space-y-3">
-        <label className="block">
-          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-            Password
-          </span>
-          <input
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            required
-            className="mt-1 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-3 text-base"
-          />
-        </label>
-        {err === "bad" ? (
-          <p className="text-sm text-rose-600">Incorrect password.</p>
-        ) : null}
-        <button
-          type="submit"
-          className="w-full rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-3 text-base font-semibold text-white dark:text-zinc-900"
-        >
-          Continue
-        </button>
-      </form>
-    </div>
-  );
-}
-
-async function AuthedPanel({
-  okMessage,
-  errMessage,
-}: {
-  okMessage?: string;
-  errMessage?: string;
-}) {
   const [stores, recent] = await Promise.all([loadStores(), loadRecentEntries()]);
   const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="space-y-6">
-      {okMessage ? (
-        <div className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200">
-          Saved: {okMessage}
+    <main className="mx-auto min-h-screen w-full max-w-md px-4 py-6 sm:py-10">
+      <header className="mb-6 flex items-start justify-between">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Falcon 37
+          </div>
+          <h1 className="mt-1 text-2xl font-semibold">COGS Entry</h1>
+          {user?.email ? (
+            <div className="mt-1 text-xs text-zinc-500">Signed in as {user.email}</div>
+          ) : null}
+        </div>
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            className="text-xs text-zinc-500 underline underline-offset-2 hover:text-zinc-300"
+          >
+            Sign out
+          </button>
+        </form>
+      </header>
+
+      {params.ok ? (
+        <div className="mb-4 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200">
+          Saved: {params.ok}
         </div>
       ) : null}
-      {errMessage && errMessage !== "bad" ? (
-        <div className="rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
-          Could not save — please try again or ask Joe.
+      {params.err ? (
+        <div className="mb-4 rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
+          Could not save — check your inputs or try again.
         </div>
       ) : null}
 
@@ -177,7 +145,7 @@ async function AuthedPanel({
         </form>
       </section>
 
-      <section>
+      <section className="mt-6">
         <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
           Last 7 submissions
         </h2>
@@ -207,14 +175,11 @@ async function AuthedPanel({
         </div>
       </section>
 
-      <form action={logoutAction}>
-        <button
-          type="submit"
-          className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 px-4 py-2 text-sm text-zinc-600 dark:text-zinc-300"
-        >
-          Log out
-        </button>
-      </form>
-    </div>
+      <div className="mt-6 text-center text-xs text-zinc-500">
+        <Link href="/ads" className="underline underline-offset-2">
+          Ad spend entry →
+        </Link>
+      </div>
+    </main>
   );
 }
