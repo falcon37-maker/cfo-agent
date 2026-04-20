@@ -446,15 +446,38 @@ kbd {
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
 }
+.kpi-row.kpi-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+@media (max-width: 1400px) {
+  .kpi-row.kpi-5 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
 @media (max-width: 1180px) {
-  .kpi-row {
+  .kpi-row,
+  .kpi-row.kpi-5 {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 @media (max-width: 620px) {
-  .kpi-row {
+  .kpi-row,
+  .kpi-row.kpi-5 {
     grid-template-columns: 1fr;
   }
+}
+
+/* PHX tag — small green pill next to page title */
+.phx-tag {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  vertical-align: middle;
 }
 .kpi-card {
   background: var(--surface);
