@@ -79,19 +79,26 @@ export async function loadStores(): Promise<StoreInfo[]> {
   })) as StoreInfo[];
 }
 
-/** Fetch raw daily_pnl rows (one per store-day) over the last `days` days. */
-async function loadPnlRows(days: number): Promise<RawPnlRow[]> {
+/** Fetch raw daily_pnl rows (one per store-day) in the inclusive [from, to] window. */
+async function loadPnlRowsInRange(from: string, to: string): Promise<RawPnlRow[]> {
   const sb = supabaseAdmin();
-  const from = addDays(todayUtc(), -(days - 1));
   const { data, error } = await sb
     .from("daily_pnl")
     .select(
       "store_id, date, revenue, cogs, fees, refunds, ad_spend, gross_profit, net_profit, margin_pct, order_count",
     )
     .gte("date", from)
+    .lte("date", to)
     .order("date", { ascending: false });
-  if (error) throw new Error(`loadPnlRows: ${error.message}`);
+  if (error) throw new Error(`loadPnlRowsInRange: ${error.message}`);
   return (data ?? []) as RawPnlRow[];
+}
+
+/** Convenience: last `days` days ending today (UTC). */
+async function loadPnlRows(days: number): Promise<RawPnlRow[]> {
+  const to = todayUtc();
+  const from = addDays(to, -(days - 1));
+  return loadPnlRowsInRange(from, to);
 }
 
 type RawPnlRow = {
@@ -179,13 +186,17 @@ export type PnlLedger = {
   storeFilter: string; // 'all' | store id
 };
 
-/** Filtered/aggregated ledger for /pnl. */
+/** Filtered/aggregated ledger for /pnl.
+ *  Pass either `days` (rolling window ending today) or an explicit `{from, to}`. */
 export async function loadPnlLedger(
-  days: number,
+  rangeSpec: { days: number } | { from: string; to: string },
   storeFilter: string,
 ): Promise<PnlLedger> {
   const stores = await loadStores();
-  const rows = await loadPnlRows(days);
+  const rows =
+    "from" in rangeSpec
+      ? await loadPnlRowsInRange(rangeSpec.from, rangeSpec.to)
+      : await loadPnlRows(rangeSpec.days);
 
   const filtered =
     storeFilter === "all"
@@ -198,6 +209,12 @@ export async function loadPnlLedger(
 
   const totals = sumTotals(ledger);
 
+  // Compute the effective days span for display (unique dates in the result set).
+  const days =
+    "days" in rangeSpec
+      ? rangeSpec.days
+      : Math.max(1, diffDays(rangeSpec.from, rangeSpec.to) + 1);
+
   return {
     stores,
     rows: ledger,
@@ -205,6 +222,12 @@ export async function loadPnlLedger(
     days,
     storeFilter,
   };
+}
+
+function diffDays(from: string, to: string): number {
+  const a = new Date(`${from}T00:00:00Z`).getTime();
+  const b = new Date(`${to}T00:00:00Z`).getTime();
+  return Math.round((b - a) / (24 * 60 * 60 * 1000));
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

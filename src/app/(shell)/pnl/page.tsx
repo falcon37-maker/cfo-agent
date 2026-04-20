@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { loadPnlLedger } from "@/lib/pnl/queries";
-import { fmtDate, fmtMoney, fmtPct } from "@/lib/format";
+import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { SegLink } from "@/components/pnl/SegLink";
+import { DateRangeForm } from "@/components/pnl/DateRangeForm";
 
 export const dynamic = "force-dynamic";
 
@@ -31,17 +32,29 @@ function qs(params: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export default async function PnlPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; store?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    store?: string;
+    from?: string;
+    to?: string;
+  }>;
 }) {
   const params = await searchParams;
-  const range = resolveRange(params.range);
   const storeFilter = (params.store ?? "all").toLowerCase();
 
+  // Custom `?from=&to=` overrides the preset `?range=`.
+  const customFrom = DATE_RE.test(params.from ?? "") ? params.from! : undefined;
+  const customTo = DATE_RE.test(params.to ?? "") ? params.to! : undefined;
+  const hasCustom = Boolean(customFrom && customTo);
+  const range = resolveRange(params.range);
+
   const ledger = await loadPnlLedger(
-    range.days,
+    hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
     storeFilter === "all" ? "all" : storeFilter.toUpperCase(),
   );
   const { rows, totals, stores } = ledger;
@@ -51,10 +64,15 @@ export default async function PnlPage({
     ...stores.map((s) => ({ id: s.id.toLowerCase(), label: s.id })),
   ];
 
-  const exportHref = `/api/export/pnl${qs({
-    range: range.id,
-    store: storeFilter,
-  })}`;
+  const exportHref = `/api/export/pnl${qs(
+    hasCustom
+      ? { from: customFrom!, to: customTo!, store: storeFilter }
+      : { range: range.id, store: storeFilter },
+  )}`;
+
+  const subLine = hasCustom
+    ? `${fmtDate(customFrom!)} → ${fmtDate(customTo!)} (${ledger.days} day${ledger.days === 1 ? "" : "s"})`
+    : `last ${range.days} days`;
 
   return (
     <>
@@ -63,7 +81,7 @@ export default async function PnlPage({
           <h2 className="section-title">Profit &amp; Loss</h2>
           <div className="section-sub">
             Daily breakdown · {storeFilter === "all" ? "All stores" : storeFilter.toUpperCase()}{" "}
-            · last {range.days} days
+            · {subLine}
           </div>
         </div>
         <div className="pnl-controls">
@@ -71,13 +89,25 @@ export default async function PnlPage({
             {RANGES.map((r) => (
               <SegLink
                 key={r.id}
-                active={r.id === range.id}
+                active={!hasCustom && r.id === range.id}
                 href={`/pnl${qs({ range: r.id, store: storeFilter })}`}
               >
                 {r.label}
               </SegLink>
             ))}
+            <SegLink
+              active={hasCustom}
+              href={`/pnl${qs({ store: storeFilter, from: customFrom ?? "", to: customTo ?? "" })}`}
+            >
+              Custom
+            </SegLink>
           </div>
+          <DateRangeForm
+            action="/pnl"
+            from={customFrom ?? rows[rows.length - 1]?.date}
+            to={customTo ?? rows[0]?.date}
+            hidden={{ store: storeFilter }}
+          />
           <div className="seg" role="tablist" aria-label="Store">
             {storeOptions.map((s) => (
               <SegLink
@@ -135,6 +165,7 @@ export default async function PnlPage({
             <thead>
               <tr>
                 <th>Date</th>
+                <th className="num">Orders</th>
                 <th className="num">Revenue</th>
                 <th className="num">Ad Spend</th>
                 <th className="num">COGS</th>
@@ -154,6 +185,7 @@ export default async function PnlPage({
                 return (
                   <tr key={r.date}>
                     <td>{fmtDate(r.date)}</td>
+                    <td className="num muted">{fmtInt(r.order_count)}</td>
                     <td className="num">{fmtMoney(r.revenue)}</td>
                     <td className="num muted">{fmtMoney(r.ad_spend)}</td>
                     <td className="num muted">{fmtMoney(r.cogs)}</td>
@@ -191,6 +223,7 @@ export default async function PnlPage({
               <tfoot>
                 <tr className="tfoot-row">
                   <td>Total</td>
+                  <td className="num">{fmtInt(totals.orders)}</td>
                   <td className="num">{fmtMoney(totals.revenue)}</td>
                   <td className="num">{fmtMoney(totals.ad_spend)}</td>
                   <td className="num">{fmtMoney(totals.cogs)}</td>

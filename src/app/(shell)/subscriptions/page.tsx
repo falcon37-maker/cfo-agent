@@ -9,6 +9,9 @@ import {
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
+import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +33,18 @@ function relTime(iso: string): string {
 export default async function SubscriptionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ store?: string }>;
+  searchParams: Promise<{ store?: string; from?: string; to?: string }>;
 }) {
   const params = await searchParams;
   const storeFilter = (params.store ?? "all").toLowerCase();
 
-  const perStore = await loadLatestSnapshots();
+  const customFrom = DATE_RE.test(params.from ?? "") ? params.from! : undefined;
+  const customTo = DATE_RE.test(params.to ?? "") ? params.to! : undefined;
+  const hasCustom = Boolean(customFrom && customTo);
+
+  const perStore = await loadLatestSnapshots(
+    hasCustom ? { from: customFrom!, to: customTo! } : undefined,
+  );
   const withData = perStore.filter((p) => p.snapshot != null);
 
   let activeSnapshot: PhxSnapshot | null = null;
@@ -77,12 +86,21 @@ export default async function SubscriptionsPage({
               <SegLink
                 key={s.id}
                 active={s.id === storeFilter}
-                href={`/subscriptions${qs({ store: s.id })}`}
+                href={`/subscriptions${qs({
+                  store: s.id,
+                  ...(hasCustom ? { from: customFrom!, to: customTo! } : {}),
+                })}`}
               >
                 {s.label}
               </SegLink>
             ))}
           </div>
+          <DateRangeForm
+            action="/subscriptions"
+            from={customFrom}
+            to={customTo}
+            hidden={{ store: storeFilter }}
+          />
         </div>
       </div>
 

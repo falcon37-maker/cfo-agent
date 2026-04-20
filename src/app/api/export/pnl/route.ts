@@ -5,17 +5,26 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const RANGE_DAYS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // GET /api/export/pnl?range=30d&store=all|NOVA|NURA|KOVA
-// Returns a CSV of the P&L ledger for the given range and store filter.
+//   or ?from=YYYY-MM-DD&to=YYYY-MM-DD&store=…
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const range = params.get("range") ?? "30d";
   const storeParam = (params.get("store") ?? "all").toLowerCase();
-  const days = RANGE_DAYS[range] ?? 30;
   const storeFilter = storeParam === "all" ? "all" : storeParam.toUpperCase();
 
-  const ledger = await loadPnlLedger(days, storeFilter);
+  const from = params.get("from");
+  const to = params.get("to");
+  const hasCustom = DATE_RE.test(from ?? "") && DATE_RE.test(to ?? "");
+
+  const range = params.get("range") ?? "30d";
+  const days = RANGE_DAYS[range] ?? 30;
+
+  const ledger = await loadPnlLedger(
+    hasCustom ? { from: from!, to: to! } : { days },
+    storeFilter,
+  );
 
   const header = [
     "Date",
@@ -74,7 +83,8 @@ export async function GET(request: NextRequest) {
   );
 
   const csv = lines.join("\n") + "\n";
-  const filename = `pnl_${storeLabel}_${range}_${new Date().toISOString().slice(0, 10)}.csv`;
+  const rangeLabel = hasCustom ? `${from}_${to}` : range;
+  const filename = `pnl_${storeLabel}_${rangeLabel}_${new Date().toISOString().slice(0, 10)}.csv`;
 
   return new Response(csv, {
     status: 200,

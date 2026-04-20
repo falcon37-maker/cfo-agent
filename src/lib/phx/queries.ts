@@ -52,8 +52,15 @@ export type PhxStoreSnapshot = {
   snapshot: PhxSnapshot | null;
 };
 
-/** Returns the latest snapshot for every active store (null if never synced). */
-export async function loadLatestSnapshots(): Promise<PhxStoreSnapshot[]> {
+/**
+ * Returns the latest snapshot for every active store. When `range` is passed,
+ * only considers snapshots whose `scrape_date` is in [range.from, range.to].
+ * Stores with no snapshot in that window get `snapshot: null`.
+ */
+export async function loadLatestSnapshots(range?: {
+  from: string;
+  to: string;
+}): Promise<PhxStoreSnapshot[]> {
   const sb = supabaseAdmin();
   const { data: stores, error: sErr } = await sb
     .from("stores")
@@ -62,16 +69,16 @@ export async function loadLatestSnapshots(): Promise<PhxStoreSnapshot[]> {
     .order("id");
   if (sErr) throw new Error(`stores: ${sErr.message}`);
 
-  // For each store, fetch the newest snapshot. Small N (~3), so one query each
-  // beats a window-function RPC for Phase A.
   const results: PhxStoreSnapshot[] = [];
   for (const s of stores ?? []) {
-    const { data } = await sb
+    let q = sb
       .from("phx_summary_snapshots")
       .select("*")
-      .eq("store_id", s.id)
-      .order("scraped_at", { ascending: false })
-      .limit(1);
+      .eq("store_id", s.id);
+    if (range) {
+      q = q.gte("scrape_date", range.from).lte("scrape_date", range.to);
+    }
+    const { data } = await q.order("scraped_at", { ascending: false }).limit(1);
     results.push({
       store_id: s.id,
       store_name: s.name,

@@ -11,6 +11,7 @@ import {
   Settings,
   Search,
   ChevronDown,
+  Calculator,
 } from "lucide-react";
 
 const NAV = [
@@ -19,6 +20,7 @@ const NAV = [
   { href: "/subscriptions", label: "Subscriptions", icon: Repeat, badge: "47" },
   { href: "/cash", label: "Cash Flow", icon: Banknote },
   { href: "/accounting", label: "Accounting", icon: FileSpreadsheet },
+  { href: "/calculator", label: "Calculator", icon: Calculator },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
