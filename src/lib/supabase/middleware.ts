@@ -5,6 +5,7 @@
 
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { getRole, canAccess, defaultHome } from "@/lib/auth/roles";
 
 /** Paths exempt from auth — everything else requires a valid session. */
 const PUBLIC_PATHS = new Set<string>(["/login"]);
@@ -55,13 +56,26 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Authenticated + on /login → bounce to ?next= or /.
+  // Authenticated + on /login → bounce to ?next= or role's default home.
   if (user && pathname === "/login") {
-    const next = request.nextUrl.searchParams.get("next") || "/";
+    const role = getRole(user.email);
+    const next = request.nextUrl.searchParams.get("next") || defaultHome(role);
+    const target = canAccess(role, next) ? next : defaultHome(role);
     const url = request.nextUrl.clone();
-    url.pathname = next.startsWith("/") ? next : "/";
+    url.pathname = target.startsWith("/") ? target : "/";
     url.search = "";
     return NextResponse.redirect(url);
+  }
+
+  // Role-based access: managers only get /cogs. Redirect elsewhere.
+  if (user) {
+    const role = getRole(user.email);
+    if (!canAccess(role, pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = defaultHome(role);
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;
