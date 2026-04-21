@@ -16,6 +16,8 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/auth/")) return true;
   // Vercel cron jobs authenticate via Bearer $CRON_SECRET, not Supabase Auth.
   if (pathname.startsWith("/api/cron/")) return true;
+  // Same pattern for Solvpath sync endpoint (cron-secret auth, not session).
+  if (pathname.startsWith("/api/sync/solvpath")) return true;
   return false;
 }
 
