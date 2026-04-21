@@ -242,6 +242,8 @@ export type BlendedDailyRow = {
   shopify_ad_spend: number;
   shopify_net_profit: number;
   shopify_orders: number;
+  shopify_cogs: number;
+  shopify_refunds: number;
   phx_revenue: number; // amortized recurring + salvage
   phx_net_contribution: number; // phx_revenue × (1 − fee_rate)
   total_revenue: number;
@@ -253,6 +255,8 @@ export type BlendedTotals = {
   shopify_ad_spend: number;
   shopify_net_profit: number;
   shopify_orders: number;
+  shopify_cogs: number;
+  shopify_refunds: number;
   phx_revenue: number;
   phx_net_contribution: number;
   total_revenue: number;
@@ -362,6 +366,8 @@ export async function loadBlendedDashboardData(
       shopify_ad_spend: round2(shop.ad_spend),
       shopify_net_profit: round2(shop.net_profit),
       shopify_orders: shop.order_count,
+      shopify_cogs: round2(shop.cogs),
+      shopify_refunds: round2(shop.refunds),
       phx_revenue: round2(phxRev),
       phx_net_contribution: round2(phxContribution),
       total_revenue: round2(shop.revenue + phxRev),
@@ -382,6 +388,8 @@ export async function loadBlendedDashboardData(
       shopify_ad_spend: round2(shop.ad_spend),
       shopify_net_profit: round2(shop.net_profit),
       shopify_orders: shop.order_count,
+      shopify_cogs: round2(shop.cogs),
+      shopify_refunds: round2(shop.refunds),
       phx_revenue: round2(phxRev),
       phx_net_contribution: round2(phxRev * (1 - feeRate)),
       total_revenue: round2(shop.revenue + phxRev),
@@ -428,6 +436,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_ad_spend = 0,
     shopify_net_profit = 0,
     shopify_orders = 0,
+    shopify_cogs = 0,
+    shopify_refunds = 0,
     phx_revenue = 0,
     phx_net_contribution = 0;
   for (const r of rows) {
@@ -435,6 +445,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_ad_spend += r.shopify_ad_spend;
     shopify_net_profit += r.shopify_net_profit;
     shopify_orders += r.shopify_orders;
+    shopify_cogs += r.shopify_cogs;
+    shopify_refunds += r.shopify_refunds;
     phx_revenue += r.phx_revenue;
     phx_net_contribution += r.phx_net_contribution;
   }
@@ -445,6 +457,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_ad_spend: round2(shopify_ad_spend),
     shopify_net_profit: round2(shopify_net_profit),
     shopify_orders,
+    shopify_cogs: round2(shopify_cogs),
+    shopify_refunds: round2(shopify_refunds),
     phx_revenue: round2(phx_revenue),
     phx_net_contribution: round2(phx_net_contribution),
     total_revenue: round2(total_revenue),

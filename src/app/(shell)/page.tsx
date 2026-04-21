@@ -1,16 +1,25 @@
 import { loadBlendedDashboardData } from "@/lib/pnl/queries";
-import { fmtDate, fmtMoney, fmtPct } from "@/lib/format";
+import { loadLatestPortfolioSnapshot } from "@/lib/phx/queries";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { fmtDate, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { SourceMixDonut } from "@/components/dashboard/SourceMixDonut";
 import { BlendedPnlTable } from "@/components/dashboard/BlendedPnlTable";
+import { BreakdownToggle } from "@/components/dashboard/BreakdownToggle";
+import { MiniBarChart } from "@/components/dashboard/MiniBarChart";
+import { Greeting } from "@/components/dashboard/Greeting";
 import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
 import {
   DollarSign,
   Megaphone,
-  Zap,
   TrendingUp,
+  Crosshair,
+  Users,
+  ArrowUpRight,
+  LineChart,
+  RefreshCcw,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -23,11 +32,21 @@ const RANGES: Array<{ id: string; label: string; days: number }> = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+const AVG_SUB_PRICE = 39.95; // TODO: replace with Solvpath actual MRR per-customer billing
+
 function qs(params: Record<string, string>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) sp.set(k, v);
   const s = sp.toString();
   return s ? `?${s}` : "";
+}
+
+function firstName(email: string | null | undefined): string {
+  if (!email) return "there";
+  const local = email.split("@")[0];
+  // e.g. "joseph.gomez" → "Joseph"
+  const first = local.split(/[._-]/)[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
 export default async function TotalPnlDashboardPage({
@@ -41,14 +60,28 @@ export default async function TotalPnlDashboardPage({
   const hasCustom = Boolean(customFrom && customTo);
   const range = RANGES.find((r) => r.id === params.range) ?? RANGES[1];
 
-  const data = await loadBlendedDashboardData(
-    hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
-  );
+  const [data, phx, supabase] = await Promise.all([
+    loadBlendedDashboardData(
+      hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
+    ),
+    loadLatestPortfolioSnapshot(
+      hasCustom ? { from: customFrom!, to: customTo! } : undefined,
+    ),
+    createSupabaseServerClient(),
+  ]);
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const name = firstName(user?.email);
 
   const t = data.periodTotals;
   const p = data.priorPeriodTotals;
 
-  const pct = (curr: number, prev: number | null | undefined): number | null => {
+  const pct = (
+    curr: number,
+    prev: number | null | undefined,
+  ): number | null => {
     if (prev == null || prev === 0) return curr === 0 ? 0 : null;
     return ((curr - prev) / Math.abs(prev)) * 100;
   };
@@ -58,30 +91,31 @@ export default async function TotalPnlDashboardPage({
   const roasDelta = pct(t.roas, p?.roas);
   const profitDelta = pct(t.total_net_profit, p?.total_net_profit);
 
-  const phxShare =
-    t.total_revenue > 0 ? (t.phx_revenue / t.total_revenue) * 100 : 0;
+  // Subscription metrics (from latest PORTFOLIO PHX snapshot)
+  const activeSubs = phx?.active_subscribers ?? null;
+  const cancelledTotal = phx?.cancelled_subscribers ?? null;
+  const newSubs = phx?.new_subscribers ?? null;
+  const cancelledPeriod = phx?.cancelled_subscribers_period ?? null;
+  const netNew =
+    newSubs != null && cancelledPeriod != null
+      ? newSubs - cancelledPeriod
+      : null;
+  const mrr = activeSubs != null ? activeSubs * AVG_SUB_PRICE : null;
+  const stickRate =
+    activeSubs != null && cancelledTotal != null && activeSubs + cancelledTotal > 0
+      ? (activeSubs / (activeSubs + cancelledTotal)) * 100
+      : null;
 
   const rangeLabel = hasCustom
-    ? `${fmtDate(customFrom!)} → ${fmtDate(customTo!)} (${data.range.days} day${data.range.days === 1 ? "" : "s"})`
+    ? `${fmtDate(customFrom!)} → ${fmtDate(customTo!)}`
     : `Last ${range.days} days`;
 
+  const deltaLabel = p ? "vs prior period" : "no prior period";
+
   return (
-    <>
-      <div className="pnl-header" style={{ marginBottom: -8 }}>
-        <div>
-          <h2 className="section-title">
-            Total P&amp;L
-            <span className="phx-tag" style={{ background: "var(--accent-bg)" }}>
-              BLENDED
-            </span>
-          </h2>
-          <div className="section-sub">
-            Shopify front-end + PHX recurring · {rangeLabel}
-            {data.phxSnapshotsUsed === 0
-              ? " · PHX: no snapshots in range"
-              : ` · PHX: ${data.phxSnapshotsUsed} snapshot${data.phxSnapshotsUsed === 1 ? "" : "s"}`}
-          </div>
-        </div>
+    <div className="dashboard-narrow">
+      <div className="pnl-header" style={{ alignItems: "center" }}>
+        <Greeting name={name} />
         <div className="pnl-controls">
           <div className="seg" role="tablist" aria-label="Range">
             {RANGES.map((r) => (
@@ -111,109 +145,182 @@ export default async function TotalPnlDashboardPage({
         </div>
       </div>
 
-      {/* Period totals strip (bigger, more prominent than KPI cards) */}
-      <section className="pnl-totals" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-        <TotalTile
-          label="Total Revenue"
-          value={fmtMoney(t.total_revenue)}
-          sub={`${fmtMoney(t.shopify_revenue)} Shopify + ${fmtMoney(t.phx_revenue)} PHX`}
-        />
-        <TotalTile
-          label="Total Ad Spend"
-          value={fmtMoney(t.shopify_ad_spend)}
-          sub="Shopify-attributed"
-        />
-        <TotalTile
-          label="Blended ROAS"
-          value={t.shopify_ad_spend > 0 ? `${t.roas.toFixed(2)}x` : "—"}
-          tone={t.roas >= 2 ? "pos" : t.shopify_ad_spend > 0 ? "neg" : undefined}
-          sub="total_revenue / ad_spend"
-        />
-        <TotalTile
-          label="Total Net Profit"
-          value={fmtMoney(t.total_net_profit)}
-          tone={t.total_net_profit >= 0 ? "pos" : "neg"}
-          sub={`Margin ${fmtPct(t.margin_pct)}`}
-        />
-        <TotalTile
-          label="PHX share"
-          value={t.total_revenue > 0 ? `${phxShare.toFixed(1)}%` : "—"}
-          sub={`Recurring ${fmtMoney(t.phx_revenue)}`}
-          tone={phxShare >= 30 ? "pos" : undefined}
-        />
+      {/* ─── MONEY STORY ─── */}
+      <section>
+        <div className="section-eyebrow">
+          Money story · <span className="muted">{rangeLabel}</span>
+        </div>
+        <div className="kpi-row">
+          <KpiCard
+            label="Total Revenue"
+            value={fmtMoney(t.total_revenue)}
+            delta={revDelta}
+            deltaLabel={deltaLabel}
+            spark={data.kpiSparks.revenue}
+            icon={<DollarSign size={14} strokeWidth={1.75} />}
+          />
+          <KpiCard
+            label="Ad Spend"
+            value={fmtMoney(t.shopify_ad_spend)}
+            delta={spendDelta}
+            deltaLabel={deltaLabel}
+            invert
+            spark={data.kpiSparks.ad_spend}
+            sparkColor="var(--muted-strong)"
+            icon={<Megaphone size={14} strokeWidth={1.75} />}
+          />
+          <KpiCard
+            label="Net Profit"
+            value={fmtMoney(t.total_net_profit)}
+            delta={profitDelta}
+            deltaLabel={deltaLabel}
+            spark={data.kpiSparks.net_profit}
+            sparkColor={
+              t.total_net_profit >= 0 ? "var(--accent)" : "var(--negative)"
+            }
+            icon={<TrendingUp size={14} strokeWidth={1.75} />}
+          />
+          <KpiCard
+            label="ROAS"
+            value={t.shopify_ad_spend > 0 ? `${t.roas.toFixed(2)}x` : "—"}
+            delta={roasDelta}
+            deltaLabel={deltaLabel}
+            spark={data.kpiSparks.roas}
+            icon={<Crosshair size={14} strokeWidth={1.75} />}
+          />
+        </div>
       </section>
 
-      {/* KPI cards with sparklines for movement — smaller, complementary */}
-      <section className="kpi-row">
-        <KpiCard
-          label={`Revenue · ${data.range.days}d`}
-          value={fmtMoney(t.total_revenue)}
-          delta={revDelta}
-          deltaLabel={p ? "vs prior period" : "no prior period"}
-          spark={data.kpiSparks.revenue}
-          icon={<DollarSign size={14} strokeWidth={1.75} />}
-        />
-        <KpiCard
-          label={`Ad Spend · ${data.range.days}d`}
-          value={fmtMoney(t.shopify_ad_spend)}
-          delta={spendDelta}
-          deltaLabel={p ? "vs prior period" : "no prior period"}
-          invert
-          spark={data.kpiSparks.ad_spend}
-          sparkColor="var(--muted-strong)"
-          icon={<Megaphone size={14} strokeWidth={1.75} />}
-        />
-        <KpiCard
-          label={`ROAS · ${data.range.days}d`}
-          value={t.shopify_ad_spend > 0 ? `${t.roas.toFixed(2)}x` : "—"}
-          delta={roasDelta}
-          deltaLabel={p ? "vs prior period" : "no prior period"}
-          spark={data.kpiSparks.roas}
-          icon={<Zap size={14} strokeWidth={1.75} />}
-        />
-        <KpiCard
-          label={`Net Profit · ${data.range.days}d`}
-          value={fmtMoney(t.total_net_profit)}
-          delta={profitDelta}
-          deltaLabel={p ? "vs prior period" : "no prior period"}
-          spark={data.kpiSparks.net_profit}
-          sparkColor={
-            t.total_net_profit >= 0 ? "var(--accent)" : "var(--negative)"
-          }
-          icon={<TrendingUp size={14} strokeWidth={1.75} />}
-        />
+      {/* ─── SUBSCRIPTION ENGINE ─── */}
+      <section>
+        <div className="section-eyebrow">
+          Subscription engine
+          {phx == null ? (
+            <span className="sub-warn"> · no PHX sync in range</span>
+          ) : null}
+        </div>
+        <div className="kpi-row">
+          <SubCard
+            label="Active Subscribers"
+            value={activeSubs != null ? activeSubs.toLocaleString() : "—"}
+            sub={
+              phx == null
+                ? "awaiting Solvpath sync"
+                : `as of ${phx.range_to ?? phx.scrape_date}`
+            }
+            icon={<Users size={14} strokeWidth={1.75} />}
+          />
+          <SubCard
+            label="Net New Subs"
+            value={netNew != null ? `${netNew >= 0 ? "+" : ""}${netNew}` : "—"}
+            sub={
+              newSubs != null && cancelledPeriod != null
+                ? `${newSubs} new · ${cancelledPeriod} cxl`
+                : "awaiting Solvpath sync"
+            }
+            icon={<ArrowUpRight size={14} strokeWidth={1.75} />}
+            visual={
+              newSubs != null && cancelledPeriod != null ? (
+                <MiniBarChart
+                  bars={[
+                    { value: newSubs },
+                    { value: cancelledPeriod, neg: true },
+                  ]}
+                />
+              ) : null
+            }
+            tone={netNew != null && netNew >= 0 ? "pos" : netNew != null ? "neg" : undefined}
+          />
+          <SubCard
+            label="MRR"
+            value={mrr != null ? fmtMoney(mrr) : "—"}
+            sub={
+              mrr != null
+                ? `${activeSubs} × $${AVG_SUB_PRICE.toFixed(2)} avg`
+                : "awaiting Solvpath sync"
+            }
+            icon={<LineChart size={14} strokeWidth={1.75} />}
+          />
+          <SubCard
+            label="Stick Rate"
+            value={stickRate != null ? `${stickRate.toFixed(1)}%` : "—"}
+            sub={
+              activeSubs != null && cancelledTotal != null
+                ? `${activeSubs.toLocaleString()} / ${(activeSubs + cancelledTotal).toLocaleString()}`
+                : "awaiting Solvpath sync"
+            }
+            icon={<RefreshCcw size={14} strokeWidth={1.75} />}
+            tone={
+              stickRate != null
+                ? stickRate >= 80
+                  ? "pos"
+                  : stickRate < 60
+                    ? "neg"
+                    : undefined
+                : undefined
+            }
+          />
+        </div>
       </section>
 
-      <section className="chart-row">
+      {/* ─── REVENUE PULSE ─── */}
+      <section>
+        <div className="section-eyebrow">Revenue pulse</div>
         <RevenueChart data={data.daily} />
-        <SourceMixDonut shopify={t.shopify_revenue} phx={t.phx_revenue} />
+        <BreakdownToggle label="Show source breakdown">
+          <SourceMixDonut
+            shopify={t.shopify_revenue}
+            phx={t.phx_revenue}
+          />
+        </BreakdownToggle>
       </section>
 
-      <BlendedPnlTable rows={data.tableRows.slice(0, 10)} />
-    </>
+      {/* ─── DAILY P&L ─── */}
+      <section>
+        <div className="section-eyebrow">Daily P&amp;L</div>
+        <BlendedPnlTable rows={data.tableRows.slice(0, 10)} />
+      </section>
+    </div>
   );
 }
 
-function TotalTile({
+function SubCard({
   label,
   value,
   sub,
+  icon,
+  visual,
   tone,
 }: {
   label: string;
   value: string;
   sub?: string;
+  icon: React.ReactNode;
+  visual?: React.ReactNode;
   tone?: "pos" | "neg";
 }) {
   return (
-    <div className={`total-tile ${tone ? `tone-${tone}` : ""}`}>
-      <div className="total-label">{label}</div>
-      <div className="total-value">{value}</div>
-      {sub ? (
-        <div className="card-sub" style={{ marginTop: 4 }}>
-          {sub}
-        </div>
-      ) : null}
+    <div className="kpi-card">
+      <div className="kpi-head">
+        <span className="kpi-label">{label}</span>
+        <div className="kpi-icon">{icon}</div>
+      </div>
+      <div
+        className="kpi-value"
+        style={
+          tone === "pos"
+            ? { color: "var(--accent)" }
+            : tone === "neg"
+              ? { color: "var(--negative)" }
+              : undefined
+        }
+      >
+        {value}
+      </div>
+      <div className="kpi-footer">
+        {sub ? <span className="kpi-delta-label">{sub}</span> : null}
+        {visual ? <div className="kpi-spark">{visual}</div> : null}
+      </div>
     </div>
   );
 }
