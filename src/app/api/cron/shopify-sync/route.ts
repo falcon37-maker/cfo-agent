@@ -1,12 +1,17 @@
 // Daily Shopify sync — triggered by Vercel cron (see vercel.json).
 //
 // For every active non-portfolio store:
-//   1. Pull today's orders from Shopify (in the store's local timezone)
-//   2. Recompute daily_pnl for that (store, date) row
+//   1. Pull YESTERDAY's orders from Shopify (in the store's local timezone).
+//      We finalize the just-completed day rather than the still-in-progress
+//      current day; "today" at midnight PST hasn't accumulated any orders yet.
+//   2. Recompute daily_pnl for that (store, date) row.
+//
+// Query params (optional):
+//   - date=YYYY-MM-DD  → sync this exact date for every store (backfill).
 //
 // Auth: Vercel cron includes an `Authorization: Bearer <CRON_SECRET>` header
 // on every cron-triggered request. Middleware lets /api/cron/* through; this
-// route enforces the secret itself.
+// route enforces the secret itself. Pass ?secret= for manual triggers.
 
 import { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -15,19 +20,24 @@ import { computeDailyPnl } from "@/lib/pnl/compute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // one store rarely takes >60s; give ourselves headroom
+export const maxDuration = 300;
 
 function unauthorized() {
   return Response.json({ error: "unauthorized" }, { status: 401 });
 }
 
-function todayInTz(tz: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
+/** "Yesterday" in the given timezone, as YYYY-MM-DD. */
+function yesterdayInTz(tz: string): string {
+  const todayLocal = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+  const [y, m, d] = todayLocal.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
 }
 
 async function handle(request: NextRequest) {
@@ -58,10 +68,17 @@ async function handle(request: NextRequest) {
     return Response.json({ error: storesErr.message }, { status: 500 });
   }
 
+  // Optional explicit date override for backfills: ?date=YYYY-MM-DD.
+  const dateOverride = request.nextUrl.searchParams.get("date");
+  const explicit =
+    dateOverride && /^\d{4}-\d{2}-\d{2}$/.test(dateOverride)
+      ? dateOverride
+      : null;
+
   const started = Date.now();
   const results = [];
   for (const store of stores ?? []) {
-    const date = todayInTz(store.timezone ?? "UTC");
+    const date = explicit ?? yesterdayInTz(store.timezone ?? "UTC");
     try {
       const pull = await syncDailyOrders(store.id, date);
       const pnl = await computeDailyPnl(store.id, date);
@@ -86,6 +103,7 @@ async function handle(request: NextRequest) {
   return Response.json({
     ok: true,
     ranAt: new Date().toISOString(),
+    mode: explicit ? "backfill" : "daily-yesterday",
     elapsedMs: Date.now() - started,
     results,
   });
