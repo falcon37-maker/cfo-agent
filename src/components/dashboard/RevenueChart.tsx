@@ -66,8 +66,11 @@ const SERIES: SeriesDef[] = [
 ];
 
 const W = 760;
-const H = 260;
-const PAD = { l: 44, r: 18, t: 18, b: 28 };
+const H = 280;
+const PAD = { l: 50, r: 18, t: 18, b: 40 };
+
+const AXIS_FONT = "'Lato', -apple-system, BlinkMacSystemFont, sans-serif";
+const AXIS_COLOR = "#9ca3af";
 const INNER_W = W - PAD.l - PAD.r;
 const INNER_H = H - PAD.t - PAD.b;
 
@@ -139,14 +142,13 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
   const y = (v: number) => PAD.t + INNER_H - (v / yMax) * INNER_H;
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => yMax * t);
-  // X-axis density: show a tick per day when short, thin as the range grows.
-  // ≤ 7 days → every day. ≤ 14 → every day. ≤ 30 → every 2nd. > 30 → every 7th.
-  const step = N <= 14 ? 1 : N <= 30 ? 2 : Math.max(1, Math.round(N / 13));
+  // X-axis density — always horizontal labels:
+  //   7d → every day    |    30d → every 2nd    |    90d → every 7th
+  const step = N <= 7 ? 1 : N <= 30 ? 2 : 7;
   const tickIndexes = Array.from({ length: N }, (_, i) => i).filter(
-    (i) => i % step === 0 || i === N - 1,
+    (i) => i % step === 0,
   );
-  // Rotate labels when they'd otherwise crowd — >14 labels on the axis.
-  const rotateLabels = tickIndexes.length > 14;
+  if (tickIndexes[tickIndexes.length - 1] !== N - 1) tickIndexes.push(N - 1);
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     if (!svgRef.current) return;
@@ -229,7 +231,7 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
           viewBox={`0 0 ${W} ${H}`}
           className="chart-svg"
           preserveAspectRatio="none"
-          style={{ width: "100%", height: 260, maxHeight: 280 }}
+          style={{ width: "100%", height: 280 }}
           onMouseMove={handleMove}
           onMouseLeave={() => setHoverIdx(null)}
         >
@@ -270,38 +272,41 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                 opacity={i === 0 ? 0.12 : 0.05}
               />
               <text
-                x={PAD.l - 6}
+                x={PAD.l - 8}
                 y={y(v) + 3}
                 textAnchor="end"
-                fontSize="9"
-                fill="var(--muted)"
-                fontFamily="var(--font-lato), 'Lato', sans-serif"
+                fontSize="10"
+                fill={AXIS_COLOR}
+                fontFamily={AXIS_FONT}
                 fontWeight="400"
-                opacity="0.75"
+                style={{ letterSpacing: "0.01em" }}
               >
                 {fmtShortMoney(v)}
               </text>
             </g>
           ))}
 
-          {/* x labels */}
-          {tickIndexes.map((i) => {
-            const cx = x(i);
-            const cy = H - 8;
+          {/* x labels — horizontal only; month prefix on first + month-change ticks */}
+          {tickIndexes.map((i, tIdx) => {
+            const prev = tIdx > 0 ? tickIndexes[tIdx - 1] : null;
+            const label = xLabelSmart(
+              sliced.map((r) => r.date),
+              i,
+              prev,
+            );
             return (
               <text
                 key={i}
-                x={cx}
-                y={cy}
-                textAnchor={rotateLabels ? "end" : "middle"}
-                fontSize="9"
-                fill="var(--muted)"
-                fontFamily="var(--font-lato), 'Lato', sans-serif"
+                x={x(i)}
+                y={H - 14}
+                textAnchor="middle"
+                fontSize="10"
+                fill={AXIS_COLOR}
+                fontFamily={AXIS_FONT}
                 fontWeight="400"
-                opacity="0.75"
-                transform={rotateLabels ? `rotate(-30 ${cx} ${cy})` : undefined}
+                style={{ letterSpacing: "0.01em" }}
               >
-                {xLabel(sliced[i].date)}
+                {label}
               </text>
             );
           })}
@@ -509,24 +514,33 @@ function fmtFullMoney(v: number): string {
   return "$" + Math.round(v).toLocaleString();
 }
 
-function xLabel(iso: string): string {
-  const [, m, d] = iso.split("-").map(Number);
-  const months = [
-    "",
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  return `${months[m]} ${d}`;
+const MONTHS = [
+  "",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * Smart tick label. Returns just the day number ("23", "25")
+ * except on the first visible tick and whenever the month changes
+ * from the previous visible tick — then prefix with the month ("Mar 23").
+ */
+function xLabelSmart(dates: string[], tickIdx: number, prevTickIdx: number | null): string {
+  const [, m, d] = dates[tickIdx].split("-").map(Number);
+  if (prevTickIdx == null) return `${MONTHS[m]} ${d}`;
+  const prevM = Number(dates[prevTickIdx].split("-")[1]);
+  if (m !== prevM) return `${MONTHS[m]} ${d}`;
+  return String(d);
 }
 
 function fullDateLabel(iso: string): string {

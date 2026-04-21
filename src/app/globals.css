@@ -496,16 +496,8 @@ kbd {
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
-}
-.pnl-date-input {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color-scheme: dark;
+  margin-top: 8px;
+  width: 100%;
 }
 
 /* ═══ Cards ═══ */
@@ -1335,10 +1327,6 @@ kbd {
 .chart-modern .card-head {
   border-bottom: 0;
   padding-bottom: 0;
-}
-/* Subtle screen-glow on SVG axis labels — dim, but gives the digital feel */
-.chart-modern .chart-svg text {
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.04));
 }
 .chart-head .card-title {
   display: flex;
