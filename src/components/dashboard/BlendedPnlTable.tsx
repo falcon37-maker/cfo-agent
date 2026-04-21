@@ -1,7 +1,5 @@
-import Link from "next/link";
 import type { BlendedDailyRow } from "@/lib/pnl/queries";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
-import { ExternalLink } from "lucide-react";
 
 type Props = {
   rows: BlendedDailyRow[];
@@ -36,31 +34,21 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
     },
   );
   const totalRoas = totals.ad_spend > 0 ? totals.total_rev / totals.ad_spend : 0;
-  const days = Math.max(1, rows.length);
-  const avgDailyRev = totals.total_rev / days;
-  const avgDailySpend = totals.ad_spend / days;
-  const avgDailyProfit = totals.net_profit / days;
-  const avgDailyRoas = avgDailySpend > 0 ? avgDailyRev / avgDailySpend : 0;
 
   return (
-    <div className="pnl-table-stack">
-      <div className="card table-card">
-        <div className="card-head">
-          <div>
-            <div className="card-title">Daily P&amp;L · blended</div>
-            <div className="card-sub">
-              Shopify front-end (direct + initial) + PHX recurring / salvage,
-              amortized per day from PHX snapshots
-            </div>
-          </div>
-          <div className="card-actions card-actions-stack">
-            {rangeControl ?? null}
-            <Link href="/pnl" className="ghost-btn">
-              <ExternalLink size={13} strokeWidth={2} />
-              Shopify-only ledger
-            </Link>
+    <div className="card table-card">
+      <div className="card-head">
+        <div>
+          <div className="card-title">Daily P&amp;L · blended</div>
+          <div className="card-sub">
+            Shopify front-end (direct + initial) + PHX recurring / salvage,
+            amortized per day from PHX snapshots
           </div>
         </div>
+        {rangeControl ? (
+          <div className="card-actions">{rangeControl}</div>
+        ) : null}
+      </div>
         <div className="table-wrap">
           <table className="pnl-table">
             <thead>
@@ -168,25 +156,9 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 >
                   {fmtMoney(totals.net_profit)}
                 </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
-      <div className="pnl-avg-line">
-        Avg daily · {fmtMoney(avgDailyRev)} rev · {fmtMoney(avgDailySpend)} spend
-        · {avgDailySpend > 0 ? `${avgDailyRoas.toFixed(2)}x ROAS` : "— ROAS"} ·{" "}
-        <span
-          style={{
-            color:
-              avgDailyProfit >= 0 ? "var(--accent)" : "var(--negative)",
-          }}
-        >
-          {fmtMoney(avgDailyProfit)} net
-        </span>{" "}
-        <span style={{ color: "var(--muted)" }}>
-          · over {days} day{days === 1 ? "" : "s"}
-        </span>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     </div>
   );

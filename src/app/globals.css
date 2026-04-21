@@ -483,12 +483,7 @@ kbd {
   margin-top: 10px;
 }
 
-/* Daily P&L table with its own range control */
-.pnl-table-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+/* Daily P&L range control (lives inside the card header) */
 .pnl-table-controls {
   display: flex;
   gap: 10px;
@@ -983,19 +978,6 @@ kbd {
   background: var(--surface-inset);
 }
 
-.pnl-avg-line {
-  font-size: 11.5px;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  padding: 6px 4px 0;
-  letter-spacing: 0.01em;
-}
-
-.card-actions-stack {
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-}
 
 /* ═══ Login (auth) ═══ */
 .auth-shell {
@@ -1348,10 +1330,15 @@ kbd {
 /* ═══ Revenue Pulse — modern chart ═══ */
 .chart-modern {
   overflow: visible;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 .chart-modern .card-head {
   border-bottom: 0;
   padding-bottom: 0;
+}
+/* Subtle screen-glow on SVG axis labels — dim, but gives the digital feel */
+.chart-modern .chart-svg text {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.04));
 }
 .chart-head .card-title {
   display: flex;
@@ -1460,6 +1447,31 @@ kbd {
 }
 .chip-delta.neg {
   color: var(--negative);
+}
+
+.filter-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 11px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--muted-strong);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 140ms, border-color 140ms, background 140ms;
+  flex-shrink: 0;
+}
+.filter-more:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--surface-2);
+}
+.filter-more[aria-expanded="true"] {
+  border-style: solid;
+  color: var(--text-dim);
 }
 
 .chart-stage {

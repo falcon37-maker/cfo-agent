@@ -1,9 +1,13 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { Plus, Minus } from "lucide-react";
 import type { BlendedDailyRow } from "@/lib/pnl/queries";
 
 type SeriesId = "revenue" | "subs" | "shopify" | "ads" | "cogs" | "refunds";
+
+// Revenue + Ad Spend always in the chip rail; the rest hidden behind "+ More".
+const PRIMARY_IDS: SeriesId[] = ["revenue", "ads"];
 
 type SeriesDef = {
   id: SeriesId;
@@ -72,6 +76,7 @@ const INNER_W = W - PAD.l - PAD.r;
 const INNER_H = H - PAD.t - PAD.b;
 
 export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
+  const [showMore, setShowMore] = useState(false);
   const [active, setActive] = useState<Record<SeriesId, boolean>>({
     revenue: true,
     subs: false,
@@ -179,7 +184,9 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
       </div>
 
       <div className="filter-rail">
-        {SERIES.map((s) => {
+        {SERIES.filter(
+          (s) => PRIMARY_IDS.includes(s.id) || showMore,
+        ).map((s) => {
           const on = active[s.id];
           const delta = deltas[s.id];
           return (
@@ -214,6 +221,22 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
             </button>
           );
         })}
+        <button
+          type="button"
+          className="filter-more"
+          onClick={() => setShowMore((v) => !v)}
+          aria-expanded={showMore}
+        >
+          {showMore ? (
+            <>
+              <Minus size={11} strokeWidth={2.5} /> Less
+            </>
+          ) : (
+            <>
+              <Plus size={11} strokeWidth={2.5} /> More
+            </>
+          )}
+        </button>
       </div>
 
       <div className="chart-stage">
@@ -236,10 +259,17 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                 x2="0"
                 y2="1"
               >
-                <stop offset="0%" stopColor={s.color} stopOpacity="0.32" />
+                <stop offset="0%" stopColor={s.color} stopOpacity="0.22" />
+                <stop offset="70%" stopColor={s.color} stopOpacity="0.04" />
                 <stop offset="100%" stopColor={s.color} stopOpacity="0" />
               </linearGradient>
             ))}
+            {/* Revenue line left→right opacity ramp: faded past, bright now */}
+            <linearGradient id="rev-stroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.35" />
+              <stop offset="60%" stopColor="var(--accent)" stopOpacity="0.85" />
+              <stop offset="100%" stopColor="var(--accent)" stopOpacity="1" />
+            </linearGradient>
           </defs>
 
           {/* y-grid */}
@@ -253,7 +283,7 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                 stroke="var(--muted)"
                 strokeWidth="1"
                 strokeDasharray={i === 0 ? "0" : "2 4"}
-                opacity={i === 0 ? 0.18 : 0.08}
+                opacity={i === 0 ? 0.12 : 0.05}
               />
               <text
                 x={PAD.l - 6}
@@ -296,22 +326,27 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
             const path = smoothPath(pts);
             const showArea = idx === 0 && visible.length <= 2;
             const area = `${path} L${x(N - 1)},${PAD.t + INNER_H} L${x(0)},${PAD.t + INNER_H} Z`;
+            // Revenue gets the left→right opacity ramp + premium drop shadow.
+            // Other primaries keep a solid stroke + subtle glow.
+            const isRev = s.id === "revenue";
+            const stroke = isRev ? "url(#rev-stroke)" : s.color;
+            const filter = isRev
+              ? "drop-shadow(0 2px 4px rgba(0,212,99,0.3)) drop-shadow(0 0 6px rgba(0,212,99,0.25))"
+              : idx === 0
+                ? `drop-shadow(0 0 4px ${s.glow})`
+                : undefined;
             return (
               <g key={s.id}>
                 {showArea ? <path d={area} fill={`url(#grad-${s.id})`} /> : null}
                 <path
                   d={path}
                   fill="none"
-                  stroke={s.color}
-                  strokeWidth={idx === 0 ? 1.8 : 1.4}
+                  stroke={stroke}
+                  strokeWidth={idx === 0 ? 1.9 : 1.4}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeDasharray={s.dashed ? "4 4" : "0"}
-                  style={
-                    idx === 0
-                      ? { filter: `drop-shadow(0 0 4px ${s.glow})` }
-                      : undefined
-                  }
+                  style={filter ? { filter } : undefined}
                 />
               </g>
             );
