@@ -1,13 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Plus, Minus } from "lucide-react";
 import type { BlendedDailyRow } from "@/lib/pnl/queries";
 
 type SeriesId = "revenue" | "subs" | "shopify" | "ads" | "cogs" | "refunds";
-
-// Revenue + Ad Spend always in the chip rail; the rest hidden behind "+ More".
-const PRIMARY_IDS: SeriesId[] = ["revenue", "ads"];
 
 type SeriesDef = {
   id: SeriesId;
@@ -76,7 +72,6 @@ const INNER_W = W - PAD.l - PAD.r;
 const INNER_H = H - PAD.t - PAD.b;
 
 export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
-  const [showMore, setShowMore] = useState(false);
   const [active, setActive] = useState<Record<SeriesId, boolean>>({
     revenue: true,
     subs: false,
@@ -144,7 +139,14 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
   const y = (v: number) => PAD.t + INNER_H - (v / yMax) * INNER_H;
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((t) => yMax * t);
-  const tickIndexes = [0, 1, 2, 3, 4].map((i) => Math.round((i / 4) * (N - 1)));
+  // X-axis density: show a tick per day when short, thin as the range grows.
+  // ≤ 7 days → every day. ≤ 14 → every day. ≤ 30 → every 2nd. > 30 → every 7th.
+  const step = N <= 14 ? 1 : N <= 30 ? 2 : Math.max(1, Math.round(N / 13));
+  const tickIndexes = Array.from({ length: N }, (_, i) => i).filter(
+    (i) => i % step === 0 || i === N - 1,
+  );
+  // Rotate labels when they'd otherwise crowd — >14 labels on the axis.
+  const rotateLabels = tickIndexes.length > 14;
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     if (!svgRef.current) return;
@@ -184,9 +186,7 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
       </div>
 
       <div className="filter-rail">
-        {SERIES.filter(
-          (s) => PRIMARY_IDS.includes(s.id) || showMore,
-        ).map((s) => {
+        {SERIES.map((s) => {
           const on = active[s.id];
           const delta = deltas[s.id];
           return (
@@ -221,22 +221,6 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
             </button>
           );
         })}
-        <button
-          type="button"
-          className="filter-more"
-          onClick={() => setShowMore((v) => !v)}
-          aria-expanded={showMore}
-        >
-          {showMore ? (
-            <>
-              <Minus size={11} strokeWidth={2.5} /> Less
-            </>
-          ) : (
-            <>
-              <Plus size={11} strokeWidth={2.5} /> More
-            </>
-          )}
-        </button>
       </div>
 
       <div className="chart-stage">
@@ -291,8 +275,8 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                 textAnchor="end"
                 fontSize="9"
                 fill="var(--muted)"
-                fontFamily="var(--font-mono)"
-                fontWeight="500"
+                fontFamily="var(--font-lato), 'Lato', sans-serif"
+                fontWeight="400"
                 opacity="0.75"
               >
                 {fmtShortMoney(v)}
@@ -301,21 +285,26 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
           ))}
 
           {/* x labels */}
-          {tickIndexes.map((i) => (
-            <text
-              key={i}
-              x={x(i)}
-              y={H - 10}
-              textAnchor="middle"
-              fontSize="9"
-              fill="var(--muted)"
-              fontFamily="var(--font-mono)"
-              fontWeight="500"
-              opacity="0.75"
-            >
-              {xLabel(sliced[i].date)}
-            </text>
-          ))}
+          {tickIndexes.map((i) => {
+            const cx = x(i);
+            const cy = H - 8;
+            return (
+              <text
+                key={i}
+                x={cx}
+                y={cy}
+                textAnchor={rotateLabels ? "end" : "middle"}
+                fontSize="9"
+                fill="var(--muted)"
+                fontFamily="var(--font-lato), 'Lato', sans-serif"
+                fontWeight="400"
+                opacity="0.75"
+                transform={rotateLabels ? `rotate(-30 ${cx} ${cy})` : undefined}
+              >
+                {xLabel(sliced[i].date)}
+              </text>
+            );
+          })}
 
           {/* series */}
           {visible.map((s, idx) => {

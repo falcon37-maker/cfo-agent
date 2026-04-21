@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Lato } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 
@@ -13,6 +13,12 @@ const jetbrains = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
+});
+
+const lato = Lato({
+  variable: "--font-lato",
+  subsets: ["latin"],
+  weight: ["400", "700"],
 });
 
 export const metadata: Metadata = {
@@ -34,7 +40,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-theme="dark" className={`${inter.variable} ${jetbrains.variable}`}>
+    <html lang="en" data-theme="dark" className={`${inter.variable} ${jetbrains.variable} ${lato.variable}`}>
       <head>
         <Script id="theme-boot" strategy="beforeInteractive">
           {themeBootScript}

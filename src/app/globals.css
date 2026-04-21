@@ -1449,30 +1449,6 @@ kbd {
   color: var(--negative);
 }
 
-.filter-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 7px 11px;
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
-  font-size: 11.5px;
-  color: var(--muted-strong);
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 140ms, border-color 140ms, background 140ms;
-  flex-shrink: 0;
-}
-.filter-more:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-  background: var(--surface-2);
-}
-.filter-more[aria-expanded="true"] {
-  border-style: solid;
-  color: var(--text-dim);
-}
 
 .chart-stage {
   position: relative;
