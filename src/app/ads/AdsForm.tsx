@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, Send } from "lucide-react";
 import { StoreSelect, type StoreOption } from "@/components/entry/StoreSelect";
 import { DatePicker } from "@/components/entry/DatePicker";
+import { AmountInput } from "@/components/entry/AmountInput";
 import { fmtMoney, fmtDate } from "@/lib/format";
 import { submitAdSpendAction } from "./actions";
 
@@ -32,20 +33,22 @@ export function AdsForm({
   const [store, setStore] = useState(stores[0]?.id ?? "");
   const [date, setDate] = useState(today);
   const [platform, setPlatform] = useState("meta");
-  const [amount, setAmount] = useState("");
+  const [parsed, setParsed] = useState(0);
   const [campaign, setCampaign] = useState("");
 
   const storeObj = stores.find((s) => s.id === store);
   const platObj = PLATFORMS.find((p) => p.id === platform);
-  const parsed = Number(amount) || 0;
 
   return (
     <div className="entry-grid">
-      <form action={submitAdSpendAction} className="card entry-card">
+      <form
+        key={`ads-${parsed}`}
+        action={submitAdSpendAction}
+        className="card entry-card"
+      >
         <input type="hidden" name="store" value={store} />
         <input type="hidden" name="date" value={date} />
         <input type="hidden" name="platform" value={platform} />
-        <input type="hidden" name="amount" value={amount} />
 
         <div className="card-head">
           <div>
@@ -96,22 +99,13 @@ export function AdsForm({
               Spend amount
               <span className="field-aside mono">USD</span>
             </span>
-            <div className="field-input field-amount">
-              <span className="amount-prefix">$</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
-                required
-              />
-            </div>
+            <AmountInput name="amount" onValueChange={setParsed} />
             <div className="field-hint">
-              Total {platObj?.name} spend for <strong>{storeObj?.name}</strong>{" "}
-              on <strong>{fmtDate(date)}</strong>.
+              Paste from Ads Manager —{" "}
+              <code style={{ fontFamily: "var(--font-mono)" }}>$4,820.00</code>,
+              commas or spaces are fine. Total {platObj?.name} spend for{" "}
+              <strong>{storeObj?.name}</strong> on{" "}
+              <strong>{fmtDate(date)}</strong>.
             </div>
           </label>
 
@@ -140,7 +134,7 @@ export function AdsForm({
             type="button"
             className="ghost-btn"
             onClick={() => {
-              setAmount("");
+              setParsed(0);
               setCampaign("");
             }}
           >

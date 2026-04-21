@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check } from "lucide-react";
 import { StoreSelect, type StoreOption } from "@/components/entry/StoreSelect";
 import { DatePicker } from "@/components/entry/DatePicker";
+import { AmountInput } from "@/components/entry/AmountInput";
 import { fmtMoney, fmtDate } from "@/lib/format";
 import { submitCogsAction } from "./actions";
 
@@ -25,18 +26,20 @@ export function CogsForm({
 }) {
   const [store, setStore] = useState(stores[0]?.id ?? "");
   const [date, setDate] = useState(today);
-  const [amount, setAmount] = useState("");
+  const [parsed, setParsed] = useState(0);
   const [note, setNote] = useState("");
 
   const storeObj = stores.find((s) => s.id === store);
-  const parsed = Number(amount) || 0;
 
   return (
     <div className="entry-grid">
-      <form action={submitCogsAction} className="card entry-card">
+      <form
+        key={`cogs-${parsed}`}
+        action={submitCogsAction}
+        className="card entry-card"
+      >
         <input type="hidden" name="store" value={store} />
         <input type="hidden" name="date" value={date} />
-        <input type="hidden" name="cogs" value={amount} />
 
         <div className="card-head">
           <div>
@@ -68,21 +71,11 @@ export function CogsForm({
               COGS amount
               <span className="field-aside mono">USD</span>
             </span>
-            <div className="field-input field-amount">
-              <span className="amount-prefix">$</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
-                required
-              />
-            </div>
+            <AmountInput name="cogs" onValueChange={setParsed} />
             <div className="field-hint">
-              Total cost of goods sold for <strong>{storeObj?.name}</strong> on{" "}
+              Paste anything — <code style={{ fontFamily: "var(--font-mono)" }}>$1,234.56</code>,{" "}
+              <code style={{ fontFamily: "var(--font-mono)" }}>1234.567</code>, spaces — we
+              clean it. Total COGS for <strong>{storeObj?.name}</strong> on{" "}
               <strong>{fmtDate(date)}</strong>.
             </div>
           </label>
@@ -110,7 +103,7 @@ export function CogsForm({
             type="button"
             className="ghost-btn"
             onClick={() => {
-              setAmount("");
+              setParsed(0);
               setNote("");
             }}
           >

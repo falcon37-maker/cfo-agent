@@ -58,9 +58,27 @@ export type DashboardData = {
     roas: number[];
     net_profit: number[];
   };
-  series30: DailyRow[]; // aggregated across all stores
-  last10: DailyRow[]; // aggregated across all stores
-  storeMixToday: PerStorePoint[];
+  series30: DailyRow[]; // aggregated across all stores (DEPRECATED — use series)
+  last10: DailyRow[]; // aggregated across all stores (DEPRECATED — use tableRows)
+  storeMixToday: PerStorePoint[]; // DEPRECATED — use storeMix
+
+  /** The range this dashboard reflects (from/to inclusive, `days` inclusive). */
+  range: { from: string; to: string; days: number };
+
+  /** Totals across the range. */
+  periodTotals: Totals;
+
+  /** Totals across the same-size period immediately prior to `range`. null if not enough history. */
+  priorPeriodTotals: Totals | null;
+
+  /** Oldest → newest daily series over the range. */
+  series: DailyRow[];
+
+  /** Newest → oldest, capped to 30 rows for the dashboard P&L table. */
+  tableRows: DailyRow[];
+
+  /** Per-store revenue / ad / profit over the range. */
+  storeMix: PerStorePoint[];
 };
 
 export async function loadStores(): Promise<StoreInfo[]> {
@@ -115,66 +133,96 @@ type RawPnlRow = {
   order_count: number;
 };
 
-export async function loadDashboardData(): Promise<DashboardData> {
+export async function loadDashboardData(
+  rangeSpec?: { days: number } | { from: string; to: string },
+): Promise<DashboardData> {
   const stores = await loadStores();
-  const rows = await loadPnlRows(30);
 
-  const byDate = groupByDate(rows);
+  // Resolve range.
   const today = todayUtc();
-  const yesterday = addDays(today, -1);
+  let from: string;
+  let to: string;
+  if (rangeSpec && "from" in rangeSpec) {
+    from = rangeSpec.from;
+    to = rangeSpec.to;
+  } else {
+    const days = rangeSpec?.days ?? 30;
+    to = today;
+    from = addDays(to, -(days - 1));
+  }
+  const days = Math.max(1, diffDays(from, to) + 1);
 
-  // Aggregate series for the chart + sparks (30 most recent days, oldest→newest)
-  const sortedDates = Object.keys(byDate).sort();
-  // keep only the last 30 dates (should already be within 30, but safety)
-  const seriesDates = sortedDates.slice(-30);
-  const series30: DailyRow[] = seriesDates.map((d) => aggregate(byDate[d]));
+  // Pull current range + the same-size prior period (for deltas) in one query.
+  const priorTo = addDays(from, -1);
+  const priorFrom = addDays(priorTo, -(days - 1));
+  const allRows = await loadPnlRowsInRange(priorFrom, to);
+  const curRows = allRows.filter((r) => r.date >= from && r.date <= to);
+  const priorRows = allRows.filter(
+    (r) => r.date >= priorFrom && r.date <= priorTo,
+  );
 
-  // 10-day consolidated P&L (most recent first)
-  const last10: DailyRow[] = [...series30].reverse().slice(0, 10);
+  const byDateCur = groupByDate(curRows);
+  const seriesDates = Object.keys(byDateCur).sort(); // oldest → newest
+  const series: DailyRow[] = seriesDates.map((d) => aggregate(byDateCur[d]));
+  const tableRows: DailyRow[] = [...series].reverse().slice(0, 30);
 
-  const todayAgg = byDate[today]
-    ? aggregate(byDate[today])
-    : emptyDailyRow(today);
-  const ydayAgg = byDate[yesterday]
-    ? aggregate(byDate[yesterday])
-    : emptyDailyRow(yesterday);
+  // Totals across the range + prior range.
+  const periodTotals = sumTotals(series);
+  const priorSeries = Object.keys(groupByDate(priorRows))
+    .sort()
+    .map((d) => aggregate(groupByDate(priorRows)[d]));
+  const priorPeriodTotals =
+    priorSeries.length > 0 ? sumTotals(priorSeries) : null;
 
-  const todayTotals = toTotals(todayAgg);
-  const yesterdayTotals = toTotals(ydayAgg);
-
+  // KPI sparks from the current range.
   const kpiSparks = {
-    revenue: series30.map((r) => r.revenue),
-    ad_spend: series30.map((r) => r.ad_spend),
-    roas: series30.map((r) =>
-      r.ad_spend > 0 ? r.revenue / r.ad_spend : 0,
-    ),
-    net_profit: series30.map((r) => r.net_profit),
+    revenue: series.map((r) => r.revenue),
+    ad_spend: series.map((r) => r.ad_spend),
+    roas: series.map((r) => (r.ad_spend > 0 ? r.revenue / r.ad_spend : 0)),
+    net_profit: series.map((r) => r.net_profit),
   };
 
-  // Store mix for today (fall back to yesterday if today is empty)
-  const mixRows = (byDate[today] && byDate[today].some((r) => Number(r.revenue) > 0))
-    ? byDate[today]
-    : byDate[yesterday] ?? [];
-  const storeMixToday: PerStorePoint[] = stores.map((s) => {
-    const row = mixRows.find((r) => r.store_id === s.id);
+  // Store mix: sum per-store metrics over the range.
+  const storeMix: PerStorePoint[] = stores.map((s) => {
+    const rows = curRows.filter((r) => r.store_id === s.id);
+    const rev = rows.reduce((sum, r) => sum + num(r.revenue), 0);
+    const ad = rows.reduce((sum, r) => sum + num(r.ad_spend), 0);
+    const profit = rows.reduce((sum, r) => sum + num(r.net_profit), 0);
+    const orders = rows.reduce((sum, r) => sum + (r.order_count ?? 0), 0);
     return {
       store: s.id,
-      revenue: num(row?.revenue),
-      ad_spend: num(row?.ad_spend),
-      net_profit: num(row?.net_profit),
-      orders: row?.order_count ?? 0,
+      revenue: rev,
+      ad_spend: ad,
+      net_profit: profit,
+      orders,
     };
   });
+
+  // Legacy fields kept for any lingering callers.
+  const todayAgg = byDateCur[today]
+    ? aggregate(byDateCur[today])
+    : emptyDailyRow(today);
+  const ydayKey = addDays(today, -1);
+  const ydayAgg = byDateCur[ydayKey]
+    ? aggregate(byDateCur[ydayKey])
+    : emptyDailyRow(ydayKey);
 
   return {
     stores,
     today,
-    todayTotals,
-    yesterdayTotals,
+    todayTotals: toTotals(todayAgg),
+    yesterdayTotals: toTotals(ydayAgg),
     kpiSparks,
-    series30,
-    last10,
-    storeMixToday,
+    series30: series,
+    last10: tableRows.slice(0, 10),
+    storeMixToday: storeMix,
+
+    range: { from, to, days },
+    periodTotals,
+    priorPeriodTotals,
+    series,
+    tableRows,
+    storeMix,
   };
 }
 

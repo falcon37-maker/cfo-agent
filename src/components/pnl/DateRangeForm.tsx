@@ -1,9 +1,12 @@
-import { ReactNode } from "react";
+"use client";
+
+import { useState } from "react";
+import { DatePicker } from "@/components/entry/DatePicker";
 
 /**
- * GET form with two date inputs. Submits to `action` with `from` and `to`
- * query params plus any hidden fields passed via `hidden`. Server-rendered —
- * no client JS required.
+ * GET form with two custom DatePickers. Submits `from` + `to` query params
+ * (plus any `hidden` fields) to `action`. Used on /pnl, /subscriptions, and
+ * the dashboard so the elegant date picker is consistent across the app.
  */
 export function DateRangeForm({
   action,
@@ -15,49 +18,52 @@ export function DateRangeForm({
   from?: string;
   to?: string;
   hidden?: Record<string, string>;
-}): ReactNode {
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [fromVal, setFromVal] = useState(from ?? addDays(today, -29));
+  const [toVal, setToVal] = useState(to ?? today);
+
   return (
     <form
       method="get"
       action={action}
       style={{
         display: "inline-flex",
-        gap: 6,
+        gap: 8,
         alignItems: "center",
+        flexWrap: "wrap",
       }}
     >
       {Object.entries(hidden).map(([k, v]) => (
         <input key={k} type="hidden" name={k} value={v} />
       ))}
-      <input
-        type="date"
-        name="from"
-        defaultValue={from ?? ""}
-        aria-label="From"
-        style={dateInputStyle}
-      />
-      <span style={{ color: "var(--muted)", fontSize: 11 }}>→</span>
-      <input
-        type="date"
-        name="to"
-        defaultValue={to ?? ""}
-        aria-label="To"
-        style={dateInputStyle}
-      />
-      <button type="submit" className="ghost-btn" style={{ padding: "5px 10px" }}>
+
+      <div style={{ minWidth: 210 }}>
+        <DatePicker value={fromVal} onChange={setFromVal} max={toVal} />
+      </div>
+      <input type="hidden" name="from" value={fromVal} />
+
+      <span style={{ color: "var(--muted)", fontSize: 12 }}>→</span>
+
+      <div style={{ minWidth: 210 }}>
+        <DatePicker value={toVal} onChange={setToVal} max={today} />
+      </div>
+      <input type="hidden" name="to" value={toVal} />
+
+      <button
+        type="submit"
+        className="ghost-btn"
+        style={{ padding: "6px 12px" }}
+      >
         Apply
       </button>
     </form>
   );
 }
 
-const dateInputStyle: React.CSSProperties = {
-  background: "var(--surface-2)",
-  border: "1px solid var(--border)",
-  borderRadius: 7,
-  color: "var(--text)",
-  fontFamily: "var(--font-mono)",
-  fontSize: 12,
-  padding: "5px 8px",
-  colorScheme: "dark",
-};
+function addDays(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}

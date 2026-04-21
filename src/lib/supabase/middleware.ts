@@ -14,6 +14,8 @@ function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   // Supabase OAuth / magic-link callbacks (future) also land under /auth.
   if (pathname.startsWith("/auth/")) return true;
+  // Vercel cron jobs authenticate via Bearer $CRON_SECRET, not Supabase Auth.
+  if (pathname.startsWith("/api/cron/")) return true;
   return false;
 }
 
