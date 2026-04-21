@@ -185,20 +185,7 @@ export default async function TotalPnlDashboardPage({
       </section>
 
       <section className="chart-row">
-        <RevenueChart
-          data={data.daily.map((d) => ({
-            date: d.date,
-            revenue: d.total_revenue,
-            cogs: 0,
-            fees: 0,
-            refunds: 0,
-            ad_spend: d.shopify_ad_spend,
-            gross_profit: 0,
-            net_profit: d.total_net_profit,
-            margin_pct: 0,
-            order_count: d.shopify_orders,
-          }))}
-        />
+        <RevenueChart data={data.daily} />
         <SourceMixDonut shopify={t.shopify_revenue} phx={t.phx_revenue} />
       </section>
 
