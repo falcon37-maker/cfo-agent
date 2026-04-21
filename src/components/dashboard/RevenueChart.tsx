@@ -250,20 +250,20 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                 x2={W - PAD.r}
                 y1={y(v)}
                 y2={y(v)}
-                stroke="var(--border)"
+                stroke="var(--muted)"
                 strokeWidth="1"
                 strokeDasharray={i === 0 ? "0" : "2 4"}
-                opacity={i === 0 ? 0.55 : 0.3}
+                opacity={i === 0 ? 0.18 : 0.08}
               />
               <text
-                x={PAD.l - 8}
+                x={PAD.l - 6}
                 y={y(v) + 3}
                 textAnchor="end"
-                fontSize="10"
+                fontSize="9"
                 fill="var(--muted)"
-                fontFamily="var(--font-sans)"
+                fontFamily="var(--font-mono)"
                 fontWeight="500"
-                letterSpacing="-0.01em"
+                opacity="0.75"
               >
                 {fmtShortMoney(v)}
               </text>
@@ -277,11 +277,11 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
               x={x(i)}
               y={H - 10}
               textAnchor="middle"
-              fontSize="10"
+              fontSize="9"
               fill="var(--muted)"
-              fontFamily="var(--font-sans)"
+              fontFamily="var(--font-mono)"
               fontWeight="500"
-              letterSpacing="0.01em"
+              opacity="0.75"
             >
               {xLabel(sliced[i].date)}
             </text>
@@ -472,7 +472,12 @@ function smoothPath(points: Array<[number, number]>): string {
 }
 
 function fmtShortMoney(v: number): string {
-  if (v >= 1000) return `$${(v / 1000).toFixed(v >= 10_000 ? 0 : 1)}k`;
+  if (v >= 1000) {
+    const digits = v >= 10_000 ? 0 : 1;
+    const s = (v / 1000).toFixed(digits);
+    // Drop trailing .0 → "$2.0k" becomes "$2k"
+    return `$${digits > 0 && s.endsWith(".0") ? s.slice(0, -2) : s}k`;
+  }
   return `$${Math.round(v)}`;
 }
 

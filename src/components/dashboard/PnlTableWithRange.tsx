@@ -13,10 +13,9 @@ const PRESET_DAYS: Record<Exclude<Preset, "custom">, number> = {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Client-side date range filter — independent of the page header. */
+/** Client-side date range filter — lives inside the P&L card header. */
 export function PnlTableWithRange({ pool }: { pool: BlendedDailyRow[] }) {
   const [preset, setPreset] = useState<Preset>("30d");
-  // Default custom window mirrors the pool's bounds.
   const defaultFrom = pool[0]?.date ?? "";
   const defaultTo = pool[pool.length - 1]?.date ?? "";
   const [fromStr, setFromStr] = useState(defaultFrom);
@@ -35,53 +34,52 @@ export function PnlTableWithRange({ pool }: { pool: BlendedDailyRow[] }) {
     return pool.slice(-days).slice().reverse();
   }, [pool, preset, fromStr, toStr]);
 
-  return (
-    <div className="pnl-table-stack">
-      <div className="pnl-table-controls">
-        <div className="seg" role="tablist" aria-label="Table range">
-          {(Object.keys(PRESET_DAYS) as Array<Exclude<Preset, "custom">>).map(
-            (id) => (
-              <button
-                key={id}
-                type="button"
-                className={preset === id ? "active" : ""}
-                onClick={() => setPreset(id)}
-              >
-                {id}
-              </button>
-            ),
-          )}
-          <button
-            type="button"
-            className={preset === "custom" ? "active" : ""}
-            onClick={() => setPreset("custom")}
-          >
-            Custom
-          </button>
-        </div>
-        {preset === "custom" ? (
-          <div className="pnl-table-custom">
-            <input
-              type="date"
-              value={fromStr}
-              min={defaultFrom}
-              max={defaultTo}
-              onChange={(e) => setFromStr(e.target.value)}
-              className="pnl-date-input"
-            />
-            <span className="sep">→</span>
-            <input
-              type="date"
-              value={toStr}
-              min={defaultFrom}
-              max={defaultTo}
-              onChange={(e) => setToStr(e.target.value)}
-              className="pnl-date-input"
-            />
-          </div>
-        ) : null}
+  const control = (
+    <div className="pnl-table-controls">
+      <div className="seg" role="tablist" aria-label="Table range">
+        {(Object.keys(PRESET_DAYS) as Array<Exclude<Preset, "custom">>).map(
+          (id) => (
+            <button
+              key={id}
+              type="button"
+              className={preset === id ? "active" : ""}
+              onClick={() => setPreset(id)}
+            >
+              {id}
+            </button>
+          ),
+        )}
+        <button
+          type="button"
+          className={preset === "custom" ? "active" : ""}
+          onClick={() => setPreset("custom")}
+        >
+          Custom
+        </button>
       </div>
-      <BlendedPnlTable rows={rows} />
+      {preset === "custom" ? (
+        <div className="pnl-table-custom">
+          <input
+            type="date"
+            value={fromStr}
+            min={defaultFrom}
+            max={defaultTo}
+            onChange={(e) => setFromStr(e.target.value)}
+            className="pnl-date-input"
+          />
+          <span className="sep">→</span>
+          <input
+            type="date"
+            value={toStr}
+            min={defaultFrom}
+            max={defaultTo}
+            onChange={(e) => setToStr(e.target.value)}
+            className="pnl-date-input"
+          />
+        </div>
+      ) : null}
     </div>
   );
+
+  return <BlendedPnlTable rows={rows} rangeControl={control} />;
 }

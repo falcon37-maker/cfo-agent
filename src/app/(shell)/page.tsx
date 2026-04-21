@@ -272,11 +272,8 @@ export default async function TotalPnlDashboardPage({
         </BreakdownToggle>
       </section>
 
-      {/* ─── DAILY P&L ─── */}
-      <section>
-        <div className="section-eyebrow">Daily P&amp;L</div>
-        <PnlTableWithRange pool={tablePool.daily} />
-      </section>
+      {/* ─── DAILY P&L ─── (title + controls live inside the card) */}
+      <PnlTableWithRange pool={tablePool.daily} />
     </div>
   );
 }
