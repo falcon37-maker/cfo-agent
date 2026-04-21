@@ -246,6 +246,7 @@ export type BlendedDailyRow = {
   shopify_refunds: number;
   phx_revenue: number; // amortized recurring + salvage
   phx_net_contribution: number; // phx_revenue × (1 − fee_rate)
+  phx_subs_billed: number; // amortized recurring_subscription_count / period days
   total_revenue: number;
   total_net_profit: number;
 };
@@ -302,8 +303,26 @@ function amortizePhxByDay(snaps: PhxSnapshot[]): Map<string, number> {
     const days = diffDays(from, to) + 1;
     if (days <= 0) continue;
     const perDay = total / days;
-    // Walk each day in the period and bucket.
     let cur = from;
+    for (let i = 0; i < days; i++) {
+      out.set(cur, (out.get(cur) ?? 0) + perDay);
+      cur = addDays(cur, 1);
+    }
+  }
+  return out;
+}
+
+/** Amortize PHX recurring_subscription_count across a snapshot's period days. */
+function amortizeSubsByDay(snaps: PhxSnapshot[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const s of snaps) {
+    if (!s.range_from || !s.range_to) continue;
+    const count = Number(s.recurring_subscription_count ?? 0);
+    if (count <= 0) continue;
+    const days = diffDays(s.range_from, s.range_to) + 1;
+    if (days <= 0) continue;
+    const perDay = count / days;
+    let cur = s.range_from;
     for (let i = 0; i < days; i++) {
       out.set(cur, (out.get(cur) ?? 0) + perDay);
       cur = addDays(cur, 1);
@@ -347,6 +366,8 @@ export async function loadBlendedDashboardData(
   const phxPrior = await loadPhxSnapshotsOverlapping(priorFrom, priorTo);
   const phxByDayCur = amortizePhxByDay(phxCur);
   const phxByDayPrior = amortizePhxByDay(phxPrior);
+  const phxSubsByDayCur = amortizeSubsByDay(phxCur);
+  const phxSubsByDayPrior = amortizeSubsByDay(phxPrior);
 
   // Aggregate Shopify per-day (across all stores).
   const shopifyByDate = groupByDate(curPnl);
@@ -370,6 +391,7 @@ export async function loadBlendedDashboardData(
       shopify_refunds: round2(shop.refunds),
       phx_revenue: round2(phxRev),
       phx_net_contribution: round2(phxContribution),
+      phx_subs_billed: Math.round(phxSubsByDayCur.get(cur) ?? 0),
       total_revenue: round2(shop.revenue + phxRev),
       total_net_profit: round2(shop.net_profit + phxContribution),
     });
@@ -392,6 +414,7 @@ export async function loadBlendedDashboardData(
       shopify_refunds: round2(shop.refunds),
       phx_revenue: round2(phxRev),
       phx_net_contribution: round2(phxRev * (1 - feeRate)),
+      phx_subs_billed: Math.round(phxSubsByDayPrior.get(curP) ?? 0),
       total_revenue: round2(shop.revenue + phxRev),
       total_net_profit: round2(shop.net_profit + phxRev * (1 - feeRate)),
     });

@@ -28,7 +28,7 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Total P&L", icon: LayoutDashboard },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pnl", label: "P&L · Shopify", icon: LineChart },
   { href: "/subscriptions", label: "Subscriptions · PHX", icon: Repeat },
   { href: "/cash", label: "Cash Flow", icon: Banknote },

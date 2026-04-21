@@ -31,6 +31,7 @@ export function BlendedPnlTable({ rows }: { rows: BlendedDailyRow[] }) {
             <tr>
               <th>Date</th>
               <th className="num">Orders</th>
+              <th className="num">Subs Billed</th>
               <th className="num">Shopify Rev</th>
               <th className="num">PHX Rev</th>
               <th className="num">Total Rev</th>
@@ -50,6 +51,9 @@ export function BlendedPnlTable({ rows }: { rows: BlendedDailyRow[] }) {
                 <tr key={r.date}>
                   <td>{fmtDate(r.date)}</td>
                   <td className="num muted">{fmtInt(r.shopify_orders)}</td>
+                  <td className="num muted">
+                    {r.phx_subs_billed > 0 ? fmtInt(r.phx_subs_billed) : "—"}
+                  </td>
                   <td className="num">{fmtMoney(r.shopify_revenue)}</td>
                   <td className="num" style={{ color: "var(--accent-dim)" }}>
                     {r.phx_revenue > 0 ? (

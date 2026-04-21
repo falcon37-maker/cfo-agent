@@ -66,8 +66,8 @@ const SERIES: SeriesDef[] = [
 ];
 
 const W = 760;
-const H = 280;
-const PAD = { l: 52, r: 22, t: 22, b: 34 };
+const H = 260;
+const PAD = { l: 44, r: 18, t: 18, b: 28 };
 const INNER_W = W - PAD.l - PAD.r;
 const INNER_H = H - PAD.t - PAD.b;
 
@@ -222,7 +222,7 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
           viewBox={`0 0 ${W} ${H}`}
           className="chart-svg"
           preserveAspectRatio="none"
-          style={{ width: "100%", height: 280 }}
+          style={{ width: "100%", height: 260, maxHeight: 280 }}
           onMouseMove={handleMove}
           onMouseLeave={() => setHoverIdx(null)}
         >
@@ -253,14 +253,14 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                 stroke="var(--border)"
                 strokeWidth="1"
                 strokeDasharray={i === 0 ? "0" : "2 4"}
-                opacity={i === 0 ? 0.9 : 0.6}
+                opacity={i === 0 ? 0.55 : 0.3}
               />
               <text
-                x={PAD.l - 10}
+                x={PAD.l - 8}
                 y={y(v) + 3}
                 textAnchor="end"
-                fontSize="10.5"
-                fill="var(--muted-strong)"
+                fontSize="10"
+                fill="var(--muted)"
                 fontFamily="var(--font-sans)"
                 fontWeight="500"
                 letterSpacing="-0.01em"
@@ -275,10 +275,10 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
             <text
               key={i}
               x={x(i)}
-              y={H - 12}
+              y={H - 10}
               textAnchor="middle"
-              fontSize="10.5"
-              fill="var(--muted-strong)"
+              fontSize="10"
+              fill="var(--muted)"
               fontFamily="var(--font-sans)"
               fontWeight="500"
               letterSpacing="0.01em"
@@ -303,13 +303,13 @@ export function RevenueChart({ data }: { data: BlendedDailyRow[] }) {
                   d={path}
                   fill="none"
                   stroke={s.color}
-                  strokeWidth={idx === 0 ? 2.4 : 1.8}
+                  strokeWidth={idx === 0 ? 1.8 : 1.4}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeDasharray={s.dashed ? "5 4" : "0"}
+                  strokeDasharray={s.dashed ? "4 4" : "0"}
                   style={
                     idx === 0
-                      ? { filter: `drop-shadow(0 0 6px ${s.glow})` }
+                      ? { filter: `drop-shadow(0 0 4px ${s.glow})` }
                       : undefined
                   }
                 />

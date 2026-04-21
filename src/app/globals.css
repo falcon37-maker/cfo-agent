@@ -483,6 +483,36 @@ kbd {
   margin-top: 10px;
 }
 
+/* Daily P&L table with its own range control */
+.pnl-table-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pnl-table-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pnl-table-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pnl-date-input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color-scheme: dark;
+}
+
 /* ═══ Cards ═══ */
 .card {
   background: var(--surface);

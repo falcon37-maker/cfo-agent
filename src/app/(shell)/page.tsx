@@ -1,11 +1,10 @@
 import { loadBlendedDashboardData } from "@/lib/pnl/queries";
 import { loadLatestPortfolioSnapshot } from "@/lib/phx/queries";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
 import { SourceMixDonut } from "@/components/dashboard/SourceMixDonut";
-import { BlendedPnlTable } from "@/components/dashboard/BlendedPnlTable";
+import { PnlTableWithRange } from "@/components/dashboard/PnlTableWithRange";
 import { BreakdownToggle } from "@/components/dashboard/BreakdownToggle";
 import { MiniBarChart } from "@/components/dashboard/MiniBarChart";
 import { Greeting } from "@/components/dashboard/Greeting";
@@ -24,6 +23,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+export const metadata = {
+  title: "Dashboard — CFO Agent",
+};
+
 const RANGES: Array<{ id: string; label: string; days: number }> = [
   { id: "7d", label: "7d", days: 7 },
   { id: "30d", label: "30d", days: 30 },
@@ -32,7 +35,9 @@ const RANGES: Array<{ id: string; label: string; days: number }> = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const AVG_SUB_PRICE = 39.95; // TODO: replace with Solvpath actual MRR per-customer billing
+// TODO: once Solvpath API is live, replace with actual scheduled billing amounts
+// for current month (accounting for mid-month joins and pre-billing churn).
+const AVG_SUB_PRICE = 39.95;
 
 function qs(params: Record<string, string>): string {
   const sp = new URLSearchParams();
@@ -41,13 +46,8 @@ function qs(params: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
-function firstName(email: string | null | undefined): string {
-  if (!email) return "there";
-  const local = email.split("@")[0];
-  // e.g. "joseph.gomez" → "Joseph"
-  const first = local.split(/[._-]/)[0];
-  return first.charAt(0).toUpperCase() + first.slice(1);
-}
+// Single-tenant app; no profile table yet.
+const DISPLAY_NAME = "Joseph";
 
 export default async function TotalPnlDashboardPage({
   searchParams,
@@ -60,20 +60,17 @@ export default async function TotalPnlDashboardPage({
   const hasCustom = Boolean(customFrom && customTo);
   const range = RANGES.find((r) => r.id === params.range) ?? RANGES[1];
 
-  const [data, phx, supabase] = await Promise.all([
+  const [data, tablePool, phx] = await Promise.all([
     loadBlendedDashboardData(
       hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
     ),
+    // Table has its own range control — always load 90 days as the pool
+    // and let the client filter.
+    loadBlendedDashboardData({ days: 90 }),
     loadLatestPortfolioSnapshot(
       hasCustom ? { from: customFrom!, to: customTo! } : undefined,
     ),
-    createSupabaseServerClient(),
   ]);
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const name = firstName(user?.email);
 
   const t = data.periodTotals;
   const p = data.priorPeriodTotals;
@@ -115,7 +112,7 @@ export default async function TotalPnlDashboardPage({
   return (
     <div className="dashboard-narrow">
       <div className="pnl-header" style={{ alignItems: "center" }}>
-        <Greeting name={name} />
+        <Greeting name={DISPLAY_NAME} />
         <div className="pnl-controls">
           <div className="seg" role="tablist" aria-label="Range">
             {RANGES.map((r) => (
@@ -232,11 +229,11 @@ export default async function TotalPnlDashboardPage({
             tone={netNew != null && netNew >= 0 ? "pos" : netNew != null ? "neg" : undefined}
           />
           <SubCard
-            label="MRR"
+            label="Est. MRR"
             value={mrr != null ? fmtMoney(mrr) : "—"}
             sub={
               mrr != null
-                ? `${activeSubs} × $${AVG_SUB_PRICE.toFixed(2)} avg`
+                ? "projected rebills this month"
                 : "awaiting Solvpath sync"
             }
             icon={<LineChart size={14} strokeWidth={1.75} />}
@@ -278,7 +275,7 @@ export default async function TotalPnlDashboardPage({
       {/* ─── DAILY P&L ─── */}
       <section>
         <div className="section-eyebrow">Daily P&amp;L</div>
-        <BlendedPnlTable rows={data.tableRows.slice(0, 10)} />
+        <PnlTableWithRange pool={tablePool.daily} />
       </section>
     </div>
   );
