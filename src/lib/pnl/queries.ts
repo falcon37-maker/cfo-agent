@@ -3,6 +3,10 @@
 // enough that a single `select … where date >= …` beats adding views/RPCs.
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  loadPhxSnapshotsOverlapping,
+  type PhxSnapshot,
+} from "@/lib/phx/queries";
 
 export type StoreInfo = {
   id: string;
@@ -225,6 +229,236 @@ export async function loadDashboardData(
     storeMix,
   };
 }
+
+// ═══ Blended (Shopify + PHX recurring) dashboard ═══════════════════════════
+// Shopify sees front-end orders (direct + initial subscription). PHX sees
+// those same orders AND the automated rebills that never hit Shopify. To
+// avoid double-counting, "PHX revenue" on this dashboard is strictly
+// recurring + salvage — the pieces Shopify doesn't know about.
+
+export type BlendedDailyRow = {
+  date: string;
+  shopify_revenue: number;
+  shopify_ad_spend: number;
+  shopify_net_profit: number;
+  shopify_orders: number;
+  phx_revenue: number; // amortized recurring + salvage
+  phx_net_contribution: number; // phx_revenue × (1 − fee_rate)
+  total_revenue: number;
+  total_net_profit: number;
+};
+
+export type BlendedTotals = {
+  shopify_revenue: number;
+  shopify_ad_spend: number;
+  shopify_net_profit: number;
+  shopify_orders: number;
+  phx_revenue: number;
+  phx_net_contribution: number;
+  total_revenue: number;
+  total_net_profit: number;
+  roas: number; // total_revenue / shopify_ad_spend
+  margin_pct: number; // total_net_profit / total_revenue × 100
+};
+
+export type BlendedDashboardData = {
+  range: { from: string; to: string; days: number };
+  feeRate: number;
+  daily: BlendedDailyRow[]; // oldest → newest
+  tableRows: BlendedDailyRow[]; // newest → oldest, capped to 30
+  periodTotals: BlendedTotals;
+  priorPeriodTotals: BlendedTotals | null;
+  sourceMix: {
+    shopify: number;
+    phx: number;
+  };
+  kpiSparks: {
+    revenue: number[];
+    ad_spend: number[];
+    roas: number[];
+    net_profit: number[];
+  };
+  phxSnapshotsUsed: number; // how many PHX snapshots overlapped the range
+};
+
+/**
+ * Amortize a PHX snapshot's recurring+salvage revenue across the days of its
+ * period. Returns a Map<date, amortizedRecurring>.
+ */
+function amortizePhxByDay(snaps: PhxSnapshot[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const s of snaps) {
+    if (!s.range_from || !s.range_to) continue;
+    const rec = Number(s.revenue_recurring ?? 0);
+    const sal = Number(s.revenue_salvage ?? 0);
+    const total = rec + sal;
+    if (total <= 0) continue;
+    const from = s.range_from;
+    const to = s.range_to;
+    const days = diffDays(from, to) + 1;
+    if (days <= 0) continue;
+    const perDay = total / days;
+    // Walk each day in the period and bucket.
+    let cur = from;
+    for (let i = 0; i < days; i++) {
+      out.set(cur, (out.get(cur) ?? 0) + perDay);
+      cur = addDays(cur, 1);
+    }
+  }
+  return out;
+}
+
+export async function loadBlendedDashboardData(
+  rangeSpec?: { days: number } | { from: string; to: string },
+): Promise<BlendedDashboardData> {
+  const stores = await loadStores();
+  const feeRate =
+    Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) || 0.1;
+
+  // Resolve range.
+  const today = todayUtc();
+  let from: string;
+  let to: string;
+  if (rangeSpec && "from" in rangeSpec) {
+    from = rangeSpec.from;
+    to = rangeSpec.to;
+  } else {
+    const d = rangeSpec?.days ?? 30;
+    to = today;
+    from = addDays(to, -(d - 1));
+  }
+  const days = Math.max(1, diffDays(from, to) + 1);
+
+  // Pull current range + prior range's Shopify rows in one query.
+  const priorTo = addDays(from, -1);
+  const priorFrom = addDays(priorTo, -(days - 1));
+  const allPnl = await loadPnlRowsInRange(priorFrom, to);
+  const curPnl = allPnl.filter((r) => r.date >= from && r.date <= to);
+  const priorPnl = allPnl.filter(
+    (r) => r.date >= priorFrom && r.date <= priorTo,
+  );
+
+  // PHX snapshots overlapping both windows (for deltas).
+  const phxCur = await loadPhxSnapshotsOverlapping(from, to);
+  const phxPrior = await loadPhxSnapshotsOverlapping(priorFrom, priorTo);
+  const phxByDayCur = amortizePhxByDay(phxCur);
+  const phxByDayPrior = amortizePhxByDay(phxPrior);
+
+  // Aggregate Shopify per-day (across all stores).
+  const shopifyByDate = groupByDate(curPnl);
+  const shopifyByDatePrior = groupByDate(priorPnl);
+
+  // Build the daily array for the current range (every day in [from..to]).
+  const daily: BlendedDailyRow[] = [];
+  let cur = from;
+  while (cur <= to) {
+    const shopRows = shopifyByDate[cur] ?? [];
+    const shop = aggregate(shopRows);
+    const phxRev = phxByDayCur.get(cur) ?? 0;
+    const phxContribution = phxRev * (1 - feeRate);
+    daily.push({
+      date: cur,
+      shopify_revenue: round2(shop.revenue),
+      shopify_ad_spend: round2(shop.ad_spend),
+      shopify_net_profit: round2(shop.net_profit),
+      shopify_orders: shop.order_count,
+      phx_revenue: round2(phxRev),
+      phx_net_contribution: round2(phxContribution),
+      total_revenue: round2(shop.revenue + phxRev),
+      total_net_profit: round2(shop.net_profit + phxContribution),
+    });
+    cur = addDays(cur, 1);
+  }
+
+  // Same shape for prior window (only used to sum totals for deltas).
+  const priorDaily: BlendedDailyRow[] = [];
+  let curP = priorFrom;
+  while (curP <= priorTo) {
+    const shop = aggregate(shopifyByDatePrior[curP] ?? []);
+    const phxRev = phxByDayPrior.get(curP) ?? 0;
+    priorDaily.push({
+      date: curP,
+      shopify_revenue: round2(shop.revenue),
+      shopify_ad_spend: round2(shop.ad_spend),
+      shopify_net_profit: round2(shop.net_profit),
+      shopify_orders: shop.order_count,
+      phx_revenue: round2(phxRev),
+      phx_net_contribution: round2(phxRev * (1 - feeRate)),
+      total_revenue: round2(shop.revenue + phxRev),
+      total_net_profit: round2(shop.net_profit + phxRev * (1 - feeRate)),
+    });
+    curP = addDays(curP, 1);
+  }
+
+  const periodTotals = sumBlended(daily);
+  const priorPeriodTotals =
+    priorDaily.length > 0 && priorPnl.length + phxPrior.length > 0
+      ? sumBlended(priorDaily)
+      : null;
+
+  const kpiSparks = {
+    revenue: daily.map((r) => r.total_revenue),
+    ad_spend: daily.map((r) => r.shopify_ad_spend),
+    roas: daily.map((r) =>
+      r.shopify_ad_spend > 0 ? r.total_revenue / r.shopify_ad_spend : 0,
+    ),
+    net_profit: daily.map((r) => r.total_net_profit),
+  };
+
+  const tableRows = [...daily].reverse().slice(0, 30);
+
+  return {
+    range: { from, to, days },
+    feeRate,
+    daily,
+    tableRows,
+    periodTotals,
+    priorPeriodTotals,
+    sourceMix: {
+      shopify: periodTotals.shopify_revenue,
+      phx: periodTotals.phx_revenue,
+    },
+    kpiSparks,
+    phxSnapshotsUsed: phxCur.length,
+  };
+}
+
+function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
+  let shopify_revenue = 0,
+    shopify_ad_spend = 0,
+    shopify_net_profit = 0,
+    shopify_orders = 0,
+    phx_revenue = 0,
+    phx_net_contribution = 0;
+  for (const r of rows) {
+    shopify_revenue += r.shopify_revenue;
+    shopify_ad_spend += r.shopify_ad_spend;
+    shopify_net_profit += r.shopify_net_profit;
+    shopify_orders += r.shopify_orders;
+    phx_revenue += r.phx_revenue;
+    phx_net_contribution += r.phx_net_contribution;
+  }
+  const total_revenue = shopify_revenue + phx_revenue;
+  const total_net_profit = shopify_net_profit + phx_net_contribution;
+  return {
+    shopify_revenue: round2(shopify_revenue),
+    shopify_ad_spend: round2(shopify_ad_spend),
+    shopify_net_profit: round2(shopify_net_profit),
+    shopify_orders,
+    phx_revenue: round2(phx_revenue),
+    phx_net_contribution: round2(phx_net_contribution),
+    total_revenue: round2(total_revenue),
+    total_net_profit: round2(total_net_profit),
+    roas: shopify_ad_spend > 0 ? total_revenue / shopify_ad_spend : 0,
+    margin_pct: total_revenue > 0 ? (total_net_profit / total_revenue) * 100 : 0,
+  };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 
 export type PnlLedger = {
   stores: StoreInfo[];

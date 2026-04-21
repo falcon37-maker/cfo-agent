@@ -5,8 +5,8 @@ import { RefreshCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 
 const TITLES: Record<string, { title: string; crumb: string; sub?: string }> = {
-  "/": { title: "Dashboard", crumb: "Dashboard" },
-  "/pnl": { title: "P&L", crumb: "P&L" },
+  "/": { title: "Total P&L", crumb: "Total P&L" },
+  "/pnl": { title: "P&L · Shopify", crumb: "P&L" },
   "/subscriptions": { title: "Subscriptions", crumb: "Subscriptions" },
   "/cash": { title: "Cash Flow", crumb: "Cash Flow" },
   "/accounting": { title: "Accounting", crumb: "Accounting" },

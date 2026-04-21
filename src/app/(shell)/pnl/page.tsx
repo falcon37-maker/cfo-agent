@@ -78,10 +78,22 @@ export default async function PnlPage({
     <>
       <div className="pnl-header">
         <div>
-          <h2 className="section-title">Profit &amp; Loss</h2>
+          <h2 className="section-title">
+            P&amp;L
+            <span
+              className="phx-tag"
+              style={{
+                background: "var(--surface-3)",
+                color: "var(--muted-strong)",
+              }}
+            >
+              SHOPIFY
+            </span>
+          </h2>
           <div className="section-sub">
-            Daily breakdown · {storeFilter === "all" ? "All stores" : storeFilter.toUpperCase()}{" "}
-            · {subLine}
+            Front-end only — direct and initial-subscription orders. For
+            blended revenue (+ PHX recurring) see the Total P&amp;L dashboard.{" "}
+            {storeFilter === "all" ? "All stores" : storeFilter.toUpperCase()} · {subLine}
           </div>
         </div>
         <div className="pnl-controls">

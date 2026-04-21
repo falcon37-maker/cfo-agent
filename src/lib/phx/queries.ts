@@ -44,6 +44,21 @@ export type PhxSnapshot = {
   refund_cdrn: number | null;
   refund_rdr_withdrawals: number | null;
   refund_chargeback_withdrawals: number | null;
+
+  // Revenue split (populated once the extension parser scrapes the Sales
+  // Revenue legend — currently always null for snapshots taken by the
+  // tile-only parser).
+  revenue_total: number | null;
+  revenue_direct: number | null;
+  revenue_initial: number | null;
+  revenue_recurring: number | null;
+  revenue_salvage: number | null;
+  revenue_upsell: number | null;
+
+  // Net subscriber flow (same caveat).
+  net_subscribers: number | null;
+  new_subscribers: number | null;
+  cancelled_subscribers_period: number | null;
 };
 
 export type PhxStoreSnapshot = {
@@ -81,6 +96,28 @@ export async function loadLatestPortfolioSnapshot(range?: {
     .order("scraped_at", { ascending: false })
     .limit(1);
   return (data?.[0] as PhxSnapshot) ?? null;
+}
+
+/**
+ * Returns every PORTFOLIO snapshot whose period overlaps the given window.
+ * Use for day-by-day amortization of PHX recurring revenue on the blended
+ * Total-P&L dashboard.
+ */
+export async function loadPhxSnapshotsOverlapping(
+  from: string,
+  to: string,
+): Promise<PhxSnapshot[]> {
+  const sb = supabaseAdmin();
+  // Period overlaps window when range_from <= to AND range_to >= from.
+  const { data, error } = await sb
+    .from("phx_summary_snapshots")
+    .select("*")
+    .eq("store_id", "PORTFOLIO")
+    .lte("range_from", to)
+    .gte("range_to", from)
+    .order("range_to", { ascending: false });
+  if (error) throw new Error(`loadPhxSnapshotsOverlapping: ${error.message}`);
+  return (data ?? []) as PhxSnapshot[];
 }
 
 /** All portfolio snapshots ordered newest period first (for a history grid). */
@@ -132,6 +169,15 @@ export function aggregateSnapshots(snaps: PhxSnapshot[]): PhxSnapshot | null {
     refund_cdrn: 0,
     refund_rdr_withdrawals: 0,
     refund_chargeback_withdrawals: 0,
+    revenue_total: null,
+    revenue_direct: null,
+    revenue_initial: null,
+    revenue_recurring: null,
+    revenue_salvage: null,
+    revenue_upsell: null,
+    net_subscribers: null,
+    new_subscribers: null,
+    cancelled_subscribers_period: null,
   };
 
   // Sum additive fields across snapshots.
