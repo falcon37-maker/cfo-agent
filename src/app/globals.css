@@ -2084,6 +2084,84 @@ kbd {
   margin-right: 4px;
 }
 
+/* Integrations list — /settings/integrations */
+.integration-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.integration-row {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-top: 1px solid var(--border);
+}
+.integration-row:first-child {
+  border-top: 0;
+}
+.integration-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 14px;
+}
+.integration-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.integration-name {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text);
+}
+.integration-desc {
+  font-size: 11.5px;
+  color: var(--muted-strong);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+.integration-detail {
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Inline banner (inside a page, not floating) — used on /settings/integrations */
+.inline-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  width: fit-content;
+}
+.inline-banner.banner-pos {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent-bg-strong);
+}
+.inline-banner.banner-muted {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.inline-banner.banner-neg {
+  background: var(--negative-bg);
+  color: var(--negative);
+  border: 1px solid rgba(255, 77, 94, 0.35);
+}
+
 /* Toast */
 .toast {
   position: fixed;
