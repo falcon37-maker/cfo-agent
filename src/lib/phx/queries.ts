@@ -120,6 +120,30 @@ export async function loadPhxSnapshotsOverlapping(
   return (data ?? []) as PhxSnapshot[];
 }
 
+/**
+ * Per-store snapshots whose period overlaps the given window. Used by the
+ * blended dashboard when PHX is the source of truth for NOVA/NURA/KOVA
+ * revenue (so we want each store's numbers, not just the portfolio roll-up).
+ */
+export async function loadPhxStoreSnapshotsOverlapping(
+  from: string,
+  to: string,
+  storeIds: string[],
+): Promise<PhxSnapshot[]> {
+  if (storeIds.length === 0) return [];
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("phx_summary_snapshots")
+    .select("*")
+    .in("store_id", storeIds)
+    .lte("range_from", to)
+    .gte("range_to", from)
+    .order("range_to", { ascending: false });
+  if (error)
+    throw new Error(`loadPhxStoreSnapshotsOverlapping: ${error.message}`);
+  return (data ?? []) as PhxSnapshot[];
+}
+
 /** All portfolio snapshots ordered newest period first (for a history grid). */
 export async function loadPortfolioSnapshots(limit = 24): Promise<PhxSnapshot[]> {
   const sb = supabaseAdmin();

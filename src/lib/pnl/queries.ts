@@ -4,9 +4,14 @@
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
-  loadPhxSnapshotsOverlapping,
+  loadPhxStoreSnapshotsOverlapping,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
+
+// Stores for which PHX/Solvpath is the source of truth for revenue. For any
+// other store, Shopify's daily_pnl stays the source (future stores that only
+// use Shopify Payments land here by default).
+const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
 
 export type StoreInfo = {
   id: string;
@@ -287,23 +292,31 @@ export type BlendedDashboardData = {
 };
 
 /**
- * Amortize a PHX snapshot's recurring+salvage revenue across the days of its
- * period. Returns a Map<date, amortizedRecurring>.
+ * Amortize a single per-store PHX snapshot's revenue (direct + initial +
+ * recurring + salvage + upsell — i.e. total) across the days of its period.
+ * Returns a Map<date, amortizedTotal>.
+ *
+ * Used when PHX is the source of truth for a store's revenue: we take every
+ * bucket PHX produced and spread it evenly across the reporting period.
  */
-function amortizePhxByDay(snaps: PhxSnapshot[]): Map<string, number> {
+function amortizePhxTotalByDay(snaps: PhxSnapshot[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const s of snaps) {
     if (!s.range_from || !s.range_to) continue;
-    const rec = Number(s.revenue_recurring ?? 0);
-    const sal = Number(s.revenue_salvage ?? 0);
-    const total = rec + sal;
-    if (total <= 0) continue;
-    const from = s.range_from;
-    const to = s.range_to;
-    const days = diffDays(from, to) + 1;
+    // Prefer the pre-summed revenue_total; fall back to the buckets.
+    const total =
+      s.revenue_total != null
+        ? Number(s.revenue_total)
+        : Number(s.revenue_direct ?? 0) +
+          Number(s.revenue_initial ?? 0) +
+          Number(s.revenue_recurring ?? 0) +
+          Number(s.revenue_salvage ?? 0) +
+          Number(s.revenue_upsell ?? 0);
+    if (!(total > 0)) continue;
+    const days = diffDays(s.range_from, s.range_to) + 1;
     if (days <= 0) continue;
     const perDay = total / days;
-    let cur = from;
+    let cur = s.range_from;
     for (let i = 0; i < days; i++) {
       out.set(cur, (out.get(cur) ?? 0) + perDay);
       cur = addDays(cur, 1);
@@ -331,6 +344,17 @@ function amortizeSubsByDay(snaps: PhxSnapshot[]): Map<string, number> {
   return out;
 }
 
+/**
+ * Sum multiple per-store amortized day-maps into one portfolio-level map.
+ */
+function sumMaps(maps: Map<string, number>[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const m of maps) {
+    for (const [k, v] of m) out.set(k, (out.get(k) ?? 0) + v);
+  }
+  return out;
+}
+
 export async function loadBlendedDashboardData(
   rangeSpec?: { days: number } | { from: string; to: string },
 ): Promise<BlendedDashboardData> {
@@ -352,7 +376,7 @@ export async function loadBlendedDashboardData(
   }
   const days = Math.max(1, diffDays(from, to) + 1);
 
-  // Pull current range + prior range's Shopify rows in one query.
+  // Pull current + prior range's Shopify rows in one query.
   const priorTo = addDays(from, -1);
   const priorFrom = addDays(priorTo, -(days - 1));
   const allPnl = await loadPnlRowsInRange(priorFrom, to);
@@ -361,39 +385,73 @@ export async function loadBlendedDashboardData(
     (r) => r.date >= priorFrom && r.date <= priorTo,
   );
 
-  // PHX snapshots overlapping both windows (for deltas).
-  const phxCur = await loadPhxSnapshotsOverlapping(from, to);
-  const phxPrior = await loadPhxSnapshotsOverlapping(priorFrom, priorTo);
-  const phxByDayCur = amortizePhxByDay(phxCur);
-  const phxByDayPrior = amortizePhxByDay(phxPrior);
+  // Per-store PHX snapshots for both windows — NOT the PORTFOLIO rollup, so
+  // we can amortize each PHX store separately.
+  const phxStoreIds = stores
+    .map((s) => s.id)
+    .filter((id) => PHX_STORE_IDS.has(id));
+  const phxCur = await loadPhxStoreSnapshotsOverlapping(from, to, phxStoreIds);
+  const phxPrior = await loadPhxStoreSnapshotsOverlapping(
+    priorFrom,
+    priorTo,
+    phxStoreIds,
+  );
+
+  // Amortize PHX per-day per-store. Subs-billed rolls up across all PHX stores.
+  const phxByDayByStoreCur = new Map<string, Map<string, number>>();
+  const phxByDayByStorePrior = new Map<string, Map<string, number>>();
+  for (const sid of phxStoreIds) {
+    phxByDayByStoreCur.set(
+      sid,
+      amortizePhxTotalByDay(phxCur.filter((s) => s.store_id === sid)),
+    );
+    phxByDayByStorePrior.set(
+      sid,
+      amortizePhxTotalByDay(phxPrior.filter((s) => s.store_id === sid)),
+    );
+  }
+  const phxByDayCur = sumMaps([...phxByDayByStoreCur.values()]);
+  const phxByDayPrior = sumMaps([...phxByDayByStorePrior.values()]);
   const phxSubsByDayCur = amortizeSubsByDay(phxCur);
   const phxSubsByDayPrior = amortizeSubsByDay(phxPrior);
 
-  // Aggregate Shopify per-day (across all stores).
-  const shopifyByDate = groupByDate(curPnl);
-  const shopifyByDatePrior = groupByDate(priorPnl);
+  // Split Shopify rows: keep non-PHX-store rows as the revenue source;
+  // PHX-store rows only contribute cogs/refunds/ad_spend/orders (revenue is
+  // taken from PHX for those stores).
+  const isPhxStore = (row: RawPnlRow) => PHX_STORE_IDS.has(row.store_id);
+  const shopifyByDateNonPhx = groupByDate(curPnl.filter((r) => !isPhxStore(r)));
+  const shopifyByDateAll = groupByDate(curPnl);
+  const shopifyByDatePriorNonPhx = groupByDate(
+    priorPnl.filter((r) => !isPhxStore(r)),
+  );
+  const shopifyByDatePriorAll = groupByDate(priorPnl);
 
   // Build the daily array for the current range (every day in [from..to]).
   const daily: BlendedDailyRow[] = [];
   let cur = from;
   while (cur <= to) {
-    const shopRows = shopifyByDate[cur] ?? [];
-    const shop = aggregate(shopRows);
+    const nonPhxShop = aggregate(shopifyByDateNonPhx[cur] ?? []);
+    const allShop = aggregate(shopifyByDateAll[cur] ?? []);
     const phxRev = phxByDayCur.get(cur) ?? 0;
     const phxContribution = phxRev * (1 - feeRate);
+    const nonPhxContribution = nonPhxShop.net_profit;
     daily.push({
       date: cur,
-      shopify_revenue: round2(shop.revenue),
-      shopify_ad_spend: round2(shop.ad_spend),
-      shopify_net_profit: round2(shop.net_profit),
-      shopify_orders: shop.order_count,
-      shopify_cogs: round2(shop.cogs),
-      shopify_refunds: round2(shop.refunds),
+      // "shopify_revenue" now means "revenue from non-PHX Shopify-only stores"
+      // (PHX stores' Shopify-side revenue is replaced with PHX's numbers).
+      shopify_revenue: round2(nonPhxShop.revenue),
+      // Ad spend, COGS, refunds, orders cover ALL stores (Shopify still sees
+      // every order — including PHX rebills — so these counts stay authoritative).
+      shopify_ad_spend: round2(allShop.ad_spend),
+      shopify_net_profit: round2(nonPhxShop.net_profit),
+      shopify_orders: allShop.order_count,
+      shopify_cogs: round2(allShop.cogs),
+      shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phxRev),
       phx_net_contribution: round2(phxContribution),
       phx_subs_billed: Math.round(phxSubsByDayCur.get(cur) ?? 0),
-      total_revenue: round2(shop.revenue + phxRev),
-      total_net_profit: round2(shop.net_profit + phxContribution),
+      total_revenue: round2(nonPhxShop.revenue + phxRev),
+      total_net_profit: round2(nonPhxContribution + phxContribution),
     });
     cur = addDays(cur, 1);
   }
@@ -402,21 +460,24 @@ export async function loadBlendedDashboardData(
   const priorDaily: BlendedDailyRow[] = [];
   let curP = priorFrom;
   while (curP <= priorTo) {
-    const shop = aggregate(shopifyByDatePrior[curP] ?? []);
+    const nonPhxShop = aggregate(shopifyByDatePriorNonPhx[curP] ?? []);
+    const allShop = aggregate(shopifyByDatePriorAll[curP] ?? []);
     const phxRev = phxByDayPrior.get(curP) ?? 0;
     priorDaily.push({
       date: curP,
-      shopify_revenue: round2(shop.revenue),
-      shopify_ad_spend: round2(shop.ad_spend),
-      shopify_net_profit: round2(shop.net_profit),
-      shopify_orders: shop.order_count,
-      shopify_cogs: round2(shop.cogs),
-      shopify_refunds: round2(shop.refunds),
+      shopify_revenue: round2(nonPhxShop.revenue),
+      shopify_ad_spend: round2(allShop.ad_spend),
+      shopify_net_profit: round2(nonPhxShop.net_profit),
+      shopify_orders: allShop.order_count,
+      shopify_cogs: round2(allShop.cogs),
+      shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phxRev),
       phx_net_contribution: round2(phxRev * (1 - feeRate)),
       phx_subs_billed: Math.round(phxSubsByDayPrior.get(curP) ?? 0),
-      total_revenue: round2(shop.revenue + phxRev),
-      total_net_profit: round2(shop.net_profit + phxRev * (1 - feeRate)),
+      total_revenue: round2(nonPhxShop.revenue + phxRev),
+      total_net_profit: round2(
+        nonPhxShop.net_profit + phxRev * (1 - feeRate),
+      ),
     });
     curP = addDays(curP, 1);
   }
