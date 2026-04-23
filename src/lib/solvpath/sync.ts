@@ -166,11 +166,11 @@ const COUNT_KEY: Record<
 // snapshot row for (store_id, range), and returns a cursor for the next
 // invocation. A driver script loops until `finished: true`.
 
-// Vercel Pro raises the function cap to 800s, so we can afford bigger
-// pages (= fewer chunks for a full backfill). 50 customers/page is a
-// good middle ground — small enough to keep merge persistence cheap,
-// big enough to cut total chunk count.
-const PAGE_SIZE = 50;
+// Vercel function cap is effectively 60s on this project (the 800s
+// project-level setting hasn't taken effect), so chunks need to fit in
+// that budget. PAGE_SIZE=10 gives each chunk ~50s of headroom for both
+// the customer iteration and per-day persistence.
+const PAGE_SIZE = 10;
 
 export type BackfillOptions = {
   from: string; // YYYY-MM-DD inclusive
@@ -244,7 +244,7 @@ export async function backfillRevenueForRange(
   const startStatus: SubscriberStatus = opts.startStatus ?? "Active";
   const startPage = Math.max(1, opts.startPage ?? 1);
   const startedAt = Date.now();
-  const deadlineMs = opts.deadlineMs ?? 750_000; // 50s headroom under Vercel Pro 800s cap
+  const deadlineMs = opts.deadlineMs ?? 40_000; // 20s headroom under Vercel 60s cap
   const deadlineHit = () => Date.now() - startedAt >= deadlineMs;
 
   if (opts.reset) {
