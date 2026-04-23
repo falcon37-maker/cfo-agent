@@ -126,6 +126,9 @@ async function handle(request: NextRequest) {
         startDate,
         totalTx: rows.length,
         sample: annotated,
+        // Dump first row in full so we can see every field Solvpath returns
+        // (StoreCode etc) — used to validate the cross-store filter rule.
+        rawFirstTx: rows[0] ?? null,
       });
     }
 

@@ -37,6 +37,15 @@ export const STORE_BY_DOMAIN: Record<string, StoreId> = {
   "kovacare.shop": "KOVA",
 };
 
+// Solvpath StoreCode → our store id. Used as the primary cross-store filter
+// (more reliable than the Domain string, which may differ between a
+// customer's primary store and an actual transaction's store).
+export const STORE_BY_CODE: Record<number, StoreId> = {
+  1059: "NOVA", // try.novasense-usa.store
+  1045: "NURA", // nuracare.shop
+  1058: "KOVA", // kovacare.shop
+};
+
 export type StoreId = "NOVA" | "NURA" | "KOVA";
 export const STORE_IDS: StoreId[] = ["NOVA", "NURA", "KOVA"];
 
@@ -54,6 +63,21 @@ function normalizeDomain(raw: string | null | undefined): string {
 export function storeFromDomain(domain: string | null | undefined): StoreId | null {
   const key = normalizeDomain(domain);
   return STORE_BY_DOMAIN[key] ?? null;
+}
+
+/**
+ * Resolve a transaction to one of our stores. Prefers StoreCode (numeric,
+ * unambiguous) when present; falls back to Domain string matching. Returns
+ * null when the tx belongs to a store we don't track — caller should skip.
+ */
+export function storeFromTransaction(tx: {
+  StoreCode?: number;
+  Domain?: string;
+}): StoreId | null {
+  if (typeof tx.StoreCode === "number" && STORE_BY_CODE[tx.StoreCode]) {
+    return STORE_BY_CODE[tx.StoreCode];
+  }
+  return storeFromDomain(tx.Domain);
 }
 
 // ─── Classifier ─────────────────────────────────────────────────────────────
@@ -191,6 +215,7 @@ export type BackfillOptions = {
 export type BackfillProgress = {
   customersSeen: number;
   customersWithTx: number;
+  customersSkippedDup: number;
   finished: boolean;
   nextStatus: SubscriberStatus | null;
   nextPage: number | null;
@@ -251,8 +276,16 @@ export async function backfillRevenueForRange(
     await deleteSnapshotsTouchingRange(opts.from, opts.to);
   }
 
+  // Dedupe set persisted across chunks. A customer who appears in multiple
+  // status lists (e.g., Active for one store + Canceled for another) would
+  // otherwise have their tx-history fetched + bucketed twice, doubling
+  // subscription revenue.
+  const seenCustomers = await loadSeenCustomers(opts.from, opts.to);
+  const newlySeen = new Set<number>();
+
   let customersSeen = 0;
   let customersWithTx = 0;
+  let customersSkippedDup = 0;
   let finished = false;
   let nextStatus: SubscriberStatus | null = null;
   let nextPage: number | null = null;
@@ -287,6 +320,15 @@ export async function backfillRevenueForRange(
       for (const cust of customers) {
         customersSeen += 1;
 
+        // Skip if we already pulled this customer's history in an earlier
+        // chunk / under a different status list.
+        if (seenCustomers.has(cust.CustomerId)) {
+          customersSkippedDup += 1;
+          continue;
+        }
+        seenCustomers.add(cust.CustomerId);
+        newlySeen.add(cust.CustomerId);
+
         let history: { Result: SolvpathTransaction[] };
         try {
           history = await getTransactionHistory(cust.CustomerId, opts.from);
@@ -301,7 +343,7 @@ export async function backfillRevenueForRange(
           if (!tx.Date) continue;
           if (tx.Date < fromIso || tx.Date > toIso) continue;
 
-          const store = storeFromDomain(tx.Domain);
+          const store = storeFromTransaction(tx);
           if (!store) continue;
 
           const txDate = tx.Date.slice(0, 10); // YYYY-MM-DD
@@ -384,6 +426,13 @@ export async function backfillRevenueForRange(
       customersSeen,
       customersWithTx,
     });
+    // Update dedupe marker AFTER successful per-day persist. If both succeed,
+    // resuming after a crash either reprocesses an unmarked customer (safe —
+    // their day-row already has their values, but we'd add again — small
+    // risk window) OR sees them as already-seen and skips.
+    if (newlySeen.size > 0) {
+      await persistSeenCustomers(opts.from, opts.to, seenCustomers);
+    }
   }
 
   // Convert Map to plain object for the JSON response.
@@ -398,6 +447,7 @@ export async function backfillRevenueForRange(
     progress: {
       customersSeen,
       customersWithTx,
+      customersSkippedDup,
       finished,
       nextStatus,
       nextPage,
@@ -409,7 +459,8 @@ export async function backfillRevenueForRange(
 /**
  * Wipe any phx_summary_snapshots rows that overlap the given window. Used
  * by reset=1 to clean BOTH old per-period rows (range spans multiple days)
- * AND prior per-day rows for the same window before a fresh ingest.
+ * AND prior per-day rows for the same window before a fresh ingest. Also
+ * clears the customer-dedupe tracking row.
  */
 async function deleteSnapshotsTouchingRange(
   from: string,
@@ -425,6 +476,62 @@ async function deleteSnapshotsTouchingRange(
     .gte("range_to", from);
   if (error)
     throw new Error(`deleteSnapshotsTouchingRange: ${error.message}`);
+  // Also wipe the dedupe marker for this window.
+  await sb
+    .from("phx_summary_snapshots")
+    .delete()
+    .eq("store_id", BACKFILL_DEDUPE_STORE_ID)
+    .eq("range_from", from)
+    .eq("range_to", to);
+}
+
+// Marker row in phx_summary_snapshots whose raw_json carries the list of
+// CustomerIds we've already pulled transaction history for in this run.
+// Some Solvpath customers appear in multiple status lists (Active +
+// Canceled if they have both states across stores), and re-fetching their
+// history would double-count subscription buckets.
+const BACKFILL_DEDUPE_STORE_ID = "__BACKFILL_DEDUPE__";
+
+async function loadSeenCustomers(
+  from: string,
+  to: string,
+): Promise<Set<number>> {
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("phx_summary_snapshots")
+    .select("raw_json")
+    .eq("store_id", BACKFILL_DEDUPE_STORE_ID)
+    .eq("range_from", from)
+    .eq("range_to", to)
+    .maybeSingle();
+  if (error && error.code !== "PGRST116") {
+    // PGRST116 = no rows; anything else is real
+    throw new Error(`loadSeenCustomers: ${error.message}`);
+  }
+  const ids = (data?.raw_json as { customerIds?: number[] } | null)?.customerIds ?? [];
+  return new Set(ids);
+}
+
+async function persistSeenCustomers(
+  from: string,
+  to: string,
+  ids: Set<number>,
+): Promise<void> {
+  if (ids.size === 0) return;
+  const sb = supabaseAdmin();
+  const now = new Date();
+  const { error } = await sb.from("phx_summary_snapshots").upsert(
+    {
+      store_id: BACKFILL_DEDUPE_STORE_ID,
+      range_from: from,
+      range_to: to,
+      scrape_date: now.toISOString().slice(0, 10),
+      scraped_at: now.toISOString(),
+      raw_json: { customerIds: [...ids].sort((a, b) => a - b) },
+    },
+    { onConflict: "store_id,range_from,range_to" },
+  );
+  if (error) throw new Error(`persistSeenCustomers: ${error.message}`);
 }
 
 type SnapshotRow = {

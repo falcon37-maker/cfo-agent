@@ -121,6 +121,7 @@ export type SolvpathTransaction = {
   Date: string; // ISO
   Amount: string;
   Domain: string;
+  StoreCode?: number; // Solvpath store id; matches /stores response
   OrderId: number;
   VipOrder: number;
   TransactionType: string; // "Direct Sale No Vault", "Void", "Refund", etc
