@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "src/app/api/sync/solvpath/route.ts": {
+      "maxDuration": 800
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/shopify-sync",
