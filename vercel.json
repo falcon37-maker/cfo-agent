@@ -1,8 +1,9 @@
 {
   "functions": {
-    "src/app/api/sync/solvpath/route.ts": {
-      "maxDuration": 800
-    }
+    "src/app/api/sync/solvpath/route.ts": { "maxDuration": 800 },
+    "src/app/api/sync/solvpath/limit-probe/route.ts": { "maxDuration": 800 },
+    "app/api/sync/solvpath/route.ts": { "maxDuration": 800 },
+    "app/api/sync/solvpath/limit-probe/route.ts": { "maxDuration": 800 }
   },
   "crons": [
     {
