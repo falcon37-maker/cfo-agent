@@ -16,9 +16,17 @@ import {
 } from "./client";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-// One-time "Direct" buyers who never subscribe still appear under "Active"
-// or similar — we pull all subscription statuses to be safe.
-export const SUBSCRIBER_STATUSES = ["Active", "Cancelled", "Paused"] as const;
+// Solvpath's valid SubscriptionStatus values (confirmed via 400 error):
+//   [Active, Canceled, Never Approved, Never Enrolled]
+// - Active: currently billing subscribers
+// - Canceled: former subscribers — may still show in-window tx from before cancel
+// - Never Enrolled: one-time buyers who never subscribed (= Direct sale only)
+// - Never Approved: payment rejects — skipped (no revenue anyway)
+export const SUBSCRIBER_STATUSES = [
+  "Active",
+  "Canceled",
+  "Never Enrolled",
+] as const;
 export type SubscriberStatus = (typeof SUBSCRIBER_STATUSES)[number];
 
 // Which Solvpath tx.Domain maps to which of our stores. Only these three
