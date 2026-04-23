@@ -13,8 +13,16 @@
 // Both accept ?secret=<CRON_SECRET> for manual triggers.
 
 import { NextRequest } from "next/server";
-import { listStores } from "@/lib/solvpath/client";
-import { backfillRevenueForRange } from "@/lib/solvpath/sync";
+import {
+  getTransactionHistory,
+  iterateCustomers,
+  listStores,
+} from "@/lib/solvpath/client";
+import {
+  backfillRevenueForRange,
+  classifyTransaction,
+  storeFromDomain,
+} from "@/lib/solvpath/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,6 +75,49 @@ async function handle(request: NextRequest) {
           DomainUrl: s.DomainUrl,
           Type: s.Type,
         })),
+      });
+    }
+
+    if (action === "smoke") {
+      // Pull a single customer's transaction history so we can eyeball the
+      // raw transaction shape + verify our classifier + domain mapping.
+      const customerIdParam = request.nextUrl.searchParams.get("customerId");
+      let customerId = customerIdParam ? Number(customerIdParam) : null;
+      if (!customerId) {
+        // Grab the first customer from the first non-empty status page.
+        for (const status of ["Active", "Cancelled", "Paused"]) {
+          for await (const c of iterateCustomers(status, 25)) {
+            customerId = c.CustomerId;
+            break;
+          }
+          if (customerId) break;
+        }
+      }
+      if (!customerId) {
+        return Response.json({ ok: false, error: "no customers returned" }, { status: 502 });
+      }
+      const startDate =
+        request.nextUrl.searchParams.get("from") ?? "2026-04-01";
+      const history = await getTransactionHistory(customerId, startDate);
+      const rows = history.Result ?? [];
+      const annotated = rows.slice(0, 20).map((tx) => ({
+        date: tx.Date,
+        domain: tx.Domain,
+        store: storeFromDomain(tx.Domain),
+        type: tx.Type,
+        transactionType: tx.TransactionType,
+        amount: tx.Amount,
+        responseCode: tx.ResponseCode,
+        recurringOrderCount: tx.RecurringOrderCount,
+        classified: classifyTransaction(tx),
+      }));
+      return Response.json({
+        ok: true,
+        action,
+        customerId,
+        startDate,
+        totalTx: rows.length,
+        sample: annotated,
       });
     }
 
