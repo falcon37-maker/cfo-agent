@@ -166,13 +166,13 @@ const COUNT_KEY: Record<
 // snapshot row for (store_id, range), and returns a cursor for the next
 // invocation. A driver script loops until `finished: true`.
 
-// Small pages (vs Solvpath's 250-max) so a page's customer iteration fits
-// well within Vercel's 60s function cap even when some getTransactionHistory
-// calls hit 429 and eat seconds of retry backoff. Per-day persistence (one
-// row per day per store, ~70 rows per chunk for a 23-day window) makes
-// chunks more expensive than period-rollup persistence did, so we keep
-// pages small.
-const PAGE_SIZE = 25;
+// Page size kept small so a single chunk's wall time stays comfortably
+// under Vercel's 60s function cap — even when Solvpath rate-limits and
+// per-customer transaction-history calls hit 429-retry backoff. Smaller
+// chunks also reduce double-count risk: when a chunk times out after
+// persisting but before responding, the driver retries and re-persists.
+// At PAGE_SIZE=10 individual chunks essentially never time out.
+const PAGE_SIZE = 10;
 
 export type BackfillOptions = {
   from: string; // YYYY-MM-DD inclusive
@@ -246,7 +246,7 @@ export async function backfillRevenueForRange(
   const startStatus: SubscriberStatus = opts.startStatus ?? "Active";
   const startPage = Math.max(1, opts.startPage ?? 1);
   const startedAt = Date.now();
-  const deadlineMs = opts.deadlineMs ?? 50_000; // leave ~10s headroom under Vercel 60s
+  const deadlineMs = opts.deadlineMs ?? 40_000; // 20s headroom for persist + response under Vercel 60s
   const deadlineHit = () => Date.now() - startedAt >= deadlineMs;
 
   if (opts.reset) {
