@@ -22,6 +22,8 @@ import {
   backfillRevenueForRange,
   classifyTransaction,
   storeFromDomain,
+  SUBSCRIBER_STATUSES,
+  type SubscriberStatus,
 } from "@/lib/solvpath/sync";
 
 export const runtime = "nodejs";
@@ -38,6 +40,12 @@ function authorized(request: NextRequest): boolean {
   const header = request.headers.get("authorization");
   const qs = request.nextUrl.searchParams.get("secret");
   return header === `Bearer ${expected}` || qs === expected;
+}
+
+function numParam(v: string | null): number | undefined {
+  if (v == null) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -130,20 +138,27 @@ async function handle(request: NextRequest) {
           { status: 400 },
         );
       }
-      const limitParam = request.nextUrl.searchParams.get("customerLimit");
-      const customerLimit = limitParam ? Number(limitParam) : undefined;
-      const throttleParam = request.nextUrl.searchParams.get("throttleMs");
-      const throttleMs = throttleParam ? Number(throttleParam) : undefined;
+      const sp = request.nextUrl.searchParams;
+      const maxCustomers = numParam(sp.get("maxCustomers"));
+      const throttleMs = numParam(sp.get("throttleMs"));
+      const startPage = numParam(sp.get("startPage"));
+      const startStatusRaw = sp.get("startStatus");
+      const startStatus: SubscriberStatus | undefined =
+        startStatusRaw && (SUBSCRIBER_STATUSES as readonly string[]).includes(startStatusRaw)
+          ? (startStatusRaw as SubscriberStatus)
+          : undefined;
+      const reset = sp.get("reset") === "1";
 
       const started = Date.now();
       const result = await backfillRevenueForRange({
         from,
         to,
-        customerLimit: Number.isFinite(customerLimit ?? NaN)
-          ? customerLimit
-          : undefined,
-        throttleMs: Number.isFinite(throttleMs ?? NaN) ? throttleMs : undefined,
-        persist: request.nextUrl.searchParams.get("dryRun") !== "1",
+        startStatus,
+        startPage,
+        maxCustomers,
+        throttleMs,
+        reset,
+        persist: sp.get("dryRun") !== "1",
       });
       return Response.json({
         ok: true,
