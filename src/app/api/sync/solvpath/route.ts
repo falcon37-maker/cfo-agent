@@ -40,9 +40,14 @@ async function handle(request: NextRequest) {
   }
   if (!authorized(request)) return unauthorized();
 
-  if (!process.env.SOLVPATH_API_KEY) {
+  const missing = [
+    "SOLVPATH_PARTNER_ID",
+    "SOLVPATH_PARTNER_TOKEN",
+    "SOLVPATH_BEARER_TOKEN",
+  ].filter((k) => !process.env[k]);
+  if (missing.length) {
     return Response.json(
-      { error: "SOLVPATH_API_KEY not set" },
+      { error: `Solvpath env not configured: ${missing.join(", ")}` },
       { status: 503 },
     );
   }

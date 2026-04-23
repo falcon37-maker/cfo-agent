@@ -1,10 +1,10 @@
 // Solvpath (Phoenix CRM) API client.
-// Base URL + API key come from SOLVPATH_BASE_URL / SOLVPATH_API_KEY.
 //
-// Auth header format wasn't in the doc paste — sending both `Authorization:
-// Bearer <key>` and `x-api-key: <key>` on every request and letting the server
-// pick the one it honors. Once we confirm which the server accepts, drop the
-// other to avoid sending the key twice.
+// Every request needs FOUR headers:
+//   - partnerId        (SOLVPATH_PARTNER_ID)
+//   - partnerToken     (SOLVPATH_PARTNER_TOKEN)
+//   - request-id       (fresh UUID per request)
+//   - Authorization    (Bearer SOLVPATH_BEARER_TOKEN)
 
 const DEFAULT_BASE = "https://pffe.phoenixtechnologies.io/phxcrm";
 
@@ -12,24 +12,27 @@ function baseUrl(): string {
   return (process.env.SOLVPATH_BASE_URL || DEFAULT_BASE).replace(/\/+$/, "");
 }
 
-function requireKey(): string {
-  const k = process.env.SOLVPATH_API_KEY;
-  if (!k) throw new Error("SOLVPATH_API_KEY is not set");
-  return k;
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`${name} is not set`);
+  return v;
 }
 
 function authHeaders(): Record<string, string> {
-  const k = requireKey();
   return {
-    Authorization: `Bearer ${k}`,
-    "x-api-key": k,
+    partnerId: requireEnv("SOLVPATH_PARTNER_ID"),
+    partnerToken: requireEnv("SOLVPATH_PARTNER_TOKEN"),
+    "request-id": crypto.randomUUID(),
+    Authorization: `Bearer ${requireEnv("SOLVPATH_BEARER_TOKEN")}`,
     Accept: "application/json",
   };
 }
 
-async function solvpathGet<T>(
+async function solvpathRequest<T>(
+  method: "GET" | "POST",
   path: string,
   params?: Record<string, string | number | undefined | null>,
+  body?: unknown,
 ): Promise<T> {
   const url = new URL(baseUrl() + path);
   if (params) {
@@ -38,17 +41,28 @@ async function solvpathGet<T>(
     }
   }
 
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: authHeaders(),
-    cache: "no-store",
-  });
+  const headers = authHeaders();
+  const init: RequestInit = { method, headers, cache: "no-store" };
+  if (body != null) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
 
+  const res = await fetch(url.toString(), init);
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Solvpath ${res.status} ${path}: ${body.slice(0, 400)}`);
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Solvpath ${res.status} ${method} ${path}: ${text.slice(0, 400)}`,
+    );
   }
   return (await res.json()) as T;
+}
+
+async function solvpathGet<T>(
+  path: string,
+  params?: Record<string, string | number | undefined | null>,
+): Promise<T> {
+  return solvpathRequest<T>("GET", path, params);
 }
 
 // ─── Types (from docs) ──────────────────────────────────────────────────────
