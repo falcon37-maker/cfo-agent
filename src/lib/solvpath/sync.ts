@@ -168,8 +168,11 @@ const COUNT_KEY: Record<
 
 // Small pages (vs Solvpath's 250-max) so a page's customer iteration fits
 // well within Vercel's 60s function cap even when some getTransactionHistory
-// calls hit 429 and eat 15s each of retry backoff.
-const PAGE_SIZE = 50;
+// calls hit 429 and eat seconds of retry backoff. Per-day persistence (one
+// row per day per store, ~70 rows per chunk for a 23-day window) makes
+// chunks more expensive than period-rollup persistence did, so we keep
+// pages small.
+const PAGE_SIZE = 25;
 
 export type BackfillOptions = {
   from: string; // YYYY-MM-DD inclusive
