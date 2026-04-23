@@ -35,9 +35,9 @@ const RANGES: Array<{ id: string; label: string; days: number }> = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// TODO: once Solvpath API is live, replace with actual scheduled billing amounts
-// for current month (accounting for mid-month joins and pre-billing churn).
-const AVG_SUB_PRICE = 39.95;
+// TODO: once we wire actual scheduled billing amounts from Solvpath, replace
+// this estimate (accounting for mid-month joins and pre-billing churn).
+const AVG_SUB_PRICE = 29.99;
 
 function qs(params: Record<string, string>): string {
   const sp = new URLSearchParams();
