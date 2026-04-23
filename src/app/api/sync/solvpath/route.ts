@@ -28,7 +28,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 600; // long-running customer iteration
+export const maxDuration = 800; // Vercel Pro cap; long-running customer iteration
 
 function unauthorized() {
   return Response.json({ error: "unauthorized" }, { status: 401 });
