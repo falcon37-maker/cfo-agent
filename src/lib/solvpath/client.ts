@@ -28,7 +28,10 @@ function authHeaders(): Record<string, string> {
   };
 }
 
-const MAX_RETRIES = 4;
+// Fewer retries keep each failing call short so we don't burn the Vercel
+// function's 60s budget on 1/2/4/8s backoff. Persistent rate-limit issues
+// surface up to the backfill loop which waits longer between chunks.
+const MAX_RETRIES = 2;
 
 async function solvpathRequest<T>(
   method: "GET" | "POST",

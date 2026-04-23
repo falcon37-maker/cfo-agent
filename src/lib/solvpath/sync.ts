@@ -129,7 +129,10 @@ function roundBuckets(b: RevenueBuckets): RevenueBuckets {
 // snapshot row for (store_id, range), and returns a cursor for the next
 // invocation. A driver script loops until `finished: true`.
 
-const PAGE_SIZE = 250;
+// Small pages (vs Solvpath's 250-max) so a page's customer iteration fits
+// well within Vercel's 60s function cap even when some getTransactionHistory
+// calls hit 429 and eat 15s each of retry backoff.
+const PAGE_SIZE = 50;
 
 export type BackfillOptions = {
   from: string; // YYYY-MM-DD inclusive
@@ -142,6 +145,9 @@ export type BackfillOptions = {
   /** If true, delete existing snapshot rows for (stores + PORTFOLIO, range)
    *  before processing. Use on the first chunk of a fresh backfill. */
   reset?: boolean;
+  /** Stop processing and return with a cursor once this many ms have elapsed.
+   *  Keeps us under Vercel's 60s function cap regardless of chunk size. */
+  deadlineMs?: number;
 };
 
 export type BackfillProgress = {
@@ -181,6 +187,9 @@ export async function backfillRevenueForRange(
   const maxCustomers = opts.maxCustomers ?? 500;
   const startStatus: SubscriberStatus = opts.startStatus ?? "Active";
   const startPage = Math.max(1, opts.startPage ?? 1);
+  const startedAt = Date.now();
+  const deadlineMs = opts.deadlineMs ?? 50_000; // leave ~10s headroom under Vercel 60s
+  const deadlineHit = () => Date.now() - startedAt >= deadlineMs;
 
   if (opts.reset) {
     await deleteSnapshotsForRange(opts.from, opts.to);
@@ -201,6 +210,17 @@ export async function backfillRevenueForRange(
     let page = si === statusIdx ? startPage : 1;
 
     while (true) {
+      // Check deadline BEFORE starting a new page (except the first page of
+      // the chunk — we always make some progress). Pages are atomic: once we
+      // start iterating customers in a page, we finish the page before
+      // checking the deadline, so the cursor always lands on a page boundary
+      // and we never double-count under merge-additive persistence.
+      if (customersSeen > 0 && deadlineHit()) {
+        nextStatus = status;
+        nextPage = page;
+        break outer;
+      }
+
       const resp = await listCustomers({
         Page: page,
         Limit: PAGE_SIZE,
