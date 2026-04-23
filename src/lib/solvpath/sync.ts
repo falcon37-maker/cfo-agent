@@ -339,9 +339,22 @@ export async function backfillRevenueForRange(
         const rows = history.Result ?? [];
         if (rows.length > 0) customersWithTx += 1;
 
+        // Per-customer OrderId dedupe: Solvpath's /transaction-history can
+        // return the same OrderId multiple times (mirrored across the
+        // customer's subscription rows). March came in at $137k vs PHX's
+        // $79k with our customer-level dedupe — counts of Initial and
+        // Recurring were ~2x at the per-tx level, indicating each tx was
+        // returned twice. Skip second+ occurrences.
+        const seenOrderIds = new Set<number>();
+
         for (const tx of rows) {
           if (!tx.Date) continue;
           if (tx.Date < fromIso || tx.Date > toIso) continue;
+
+          if (typeof tx.OrderId === "number") {
+            if (seenOrderIds.has(tx.OrderId)) continue;
+            seenOrderIds.add(tx.OrderId);
+          }
 
           const store = storeFromTransaction(tx);
           if (!store) continue;
