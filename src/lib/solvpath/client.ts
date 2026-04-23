@@ -28,6 +28,8 @@ function authHeaders(): Record<string, string> {
   };
 }
 
+const MAX_RETRIES = 4;
+
 async function solvpathRequest<T>(
   method: "GET" | "POST",
   path: string,
@@ -41,21 +43,38 @@ async function solvpathRequest<T>(
     }
   }
 
-  const headers = authHeaders();
-  const init: RequestInit = { method, headers, cache: "no-store" };
-  if (body != null) {
-    headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify(body);
-  }
+  let lastText = "";
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // Fresh headers each attempt so request-id is unique per retry.
+    const headers = authHeaders();
+    const init: RequestInit = { method, headers, cache: "no-store" };
+    if (body != null) {
+      headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
 
-  const res = await fetch(url.toString(), init);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Solvpath ${res.status} ${method} ${path}: ${text.slice(0, 400)}`,
-    );
+    const res = await fetch(url.toString(), init);
+    if (res.ok) return (await res.json()) as T;
+
+    lastStatus = res.status;
+    lastText = await res.text().catch(() => "");
+
+    // Back off and retry on rate-limit + transient 5xx.
+    if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
+      const retryAfter = Number(res.headers.get("Retry-After"));
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 1000 * Math.pow(2, attempt); // 1s, 2s, 4s, 8s
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+
+    break; // non-retryable
   }
-  return (await res.json()) as T;
+  throw new Error(
+    `Solvpath ${lastStatus} ${method} ${path}: ${lastText.slice(0, 400)}`,
+  );
 }
 
 async function solvpathGet<T>(

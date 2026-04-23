@@ -150,7 +150,7 @@ export async function backfillRevenueForRange(
   };
   const portfolio = emptyBuckets();
 
-  const throttle = opts.throttleMs ?? 50;
+  const throttle = opts.throttleMs ?? 200;
   const fromIso = `${opts.from}T00:00:00.000Z`;
   const toIso = `${opts.to}T23:59:59.999Z`;
   let customersSeen = 0;

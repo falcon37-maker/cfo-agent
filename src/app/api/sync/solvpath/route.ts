@@ -132,6 +132,8 @@ async function handle(request: NextRequest) {
       }
       const limitParam = request.nextUrl.searchParams.get("customerLimit");
       const customerLimit = limitParam ? Number(limitParam) : undefined;
+      const throttleParam = request.nextUrl.searchParams.get("throttleMs");
+      const throttleMs = throttleParam ? Number(throttleParam) : undefined;
 
       const started = Date.now();
       const result = await backfillRevenueForRange({
@@ -140,6 +142,7 @@ async function handle(request: NextRequest) {
         customerLimit: Number.isFinite(customerLimit ?? NaN)
           ? customerLimit
           : undefined,
+        throttleMs: Number.isFinite(throttleMs ?? NaN) ? throttleMs : undefined,
         persist: request.nextUrl.searchParams.get("dryRun") !== "1",
       });
       return Response.json({
