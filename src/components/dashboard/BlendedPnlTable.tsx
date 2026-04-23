@@ -16,20 +16,24 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
     (acc, r) => {
       acc.orders += r.shopify_orders;
       acc.subs += r.phx_subs_billed;
-      acc.shopify_rev += r.shopify_revenue;
-      acc.phx_rev += r.phx_revenue;
+      // Frontend = PHX Direct + Initial (acquisition), plus revenue from any
+      // store NOT on PHX (which still flows through shopify_revenue).
+      acc.frontend_rev += r.phx_frontend_revenue + r.shopify_revenue;
+      acc.subs_rev += r.phx_subs_revenue;
       acc.total_rev += r.total_revenue;
       acc.ad_spend += r.shopify_ad_spend;
+      acc.cogs += r.shopify_cogs;
       acc.net_profit += r.total_net_profit;
       return acc;
     },
     {
       orders: 0,
       subs: 0,
-      shopify_rev: 0,
-      phx_rev: 0,
+      frontend_rev: 0,
+      subs_rev: 0,
       total_rev: 0,
       ad_spend: 0,
+      cogs: 0,
       net_profit: 0,
     },
   );
@@ -56,10 +60,11 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 <th>Date</th>
                 <th className="num">Orders</th>
                 <th className="num">Subs Billed</th>
-                <th className="num">Shopify Rev</th>
-                <th className="num">PHX Rev</th>
-                <th className="num">Total Rev</th>
+                <th className="num">Frontend Rev</th>
+                <th className="num">Subs Rev</th>
                 <th className="num">Ad Spend</th>
+                <th className="num">COGS</th>
+                <th className="num">Total Rev</th>
                 <th className="num">ROAS</th>
                 <th className="num">Net Profit</th>
               </tr>
@@ -70,8 +75,9 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                   r.shopify_ad_spend > 0 ? r.total_revenue / r.shopify_ad_spend : 0;
                 const strongRoas = roas >= 3.0;
                 const profitable = r.total_net_profit >= 0;
-                const phxShare =
-                  r.total_revenue > 0 ? (r.phx_revenue / r.total_revenue) * 100 : 0;
+                // Frontend Rev = PHX Direct + Initial (Vip Initial), plus
+                // any non-PHX store's Shopify revenue (which lives in shopify_revenue).
+                const frontendRev = r.phx_frontend_revenue + r.shopify_revenue;
                 return (
                   <tr key={r.date}>
                     <td>{fmtDate(r.date)}</td>
@@ -79,32 +85,22 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                     <td className="num muted">
                       {r.phx_subs_billed > 0 ? fmtInt(r.phx_subs_billed) : "—"}
                     </td>
-                    <td className="num">{fmtMoney(r.shopify_revenue)}</td>
+                    <td className="num">
+                      {frontendRev > 0 ? fmtMoney(frontendRev) : "—"}
+                    </td>
                     <td
                       className="num"
                       style={{ color: "var(--accent-dim)" }}
                     >
-                      {r.phx_revenue > 0 ? (
-                        <>
-                          {fmtMoney(r.phx_revenue)}
-                          <span
-                            style={{
-                              color: "var(--muted)",
-                              fontSize: 10.5,
-                              marginLeft: 6,
-                            }}
-                          >
-                            {phxShare.toFixed(0)}%
-                          </span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
+                      {r.phx_subs_revenue > 0
+                        ? fmtMoney(r.phx_subs_revenue)
+                        : "—"}
                     </td>
+                    <td className="num muted">{fmtMoney(r.shopify_ad_spend)}</td>
+                    <td className="num muted">{fmtMoney(r.shopify_cogs)}</td>
                     <td className="num" style={{ fontWeight: 550 }}>
                       {fmtMoney(r.total_revenue)}
                     </td>
-                    <td className="num muted">{fmtMoney(r.shopify_ad_spend)}</td>
                     <td
                       className={`num roas ${
                         r.shopify_ad_spend > 0
@@ -132,12 +128,17 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 <td className="num">
                   {totals.subs > 0 ? fmtInt(totals.subs) : "—"}
                 </td>
-                <td className="num">{fmtMoney(totals.shopify_rev)}</td>
                 <td className="num">
-                  {totals.phx_rev > 0 ? fmtMoney(totals.phx_rev) : "—"}
+                  {totals.frontend_rev > 0
+                    ? fmtMoney(totals.frontend_rev)
+                    : "—"}
                 </td>
-                <td className="num">{fmtMoney(totals.total_rev)}</td>
+                <td className="num">
+                  {totals.subs_rev > 0 ? fmtMoney(totals.subs_rev) : "—"}
+                </td>
                 <td className="num">{fmtMoney(totals.ad_spend)}</td>
+                <td className="num">{fmtMoney(totals.cogs)}</td>
+                <td className="num">{fmtMoney(totals.total_rev)}</td>
                 <td
                   className={`num ${
                     totals.ad_spend > 0

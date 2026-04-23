@@ -59,6 +59,10 @@ export type PhxSnapshot = {
   net_subscribers: number | null;
   new_subscribers: number | null;
   cancelled_subscribers_period: number | null;
+
+  // Free-form metadata: per-bucket counts (recurringCount, salvageCount,
+  // directCount, etc.), refund tally, customer iteration meta.
+  raw_json: Record<string, unknown> | null;
 };
 
 export type PhxStoreSnapshot = {
@@ -144,6 +148,33 @@ export async function loadPhxStoreSnapshotsOverlapping(
   return (data ?? []) as PhxSnapshot[];
 }
 
+/**
+ * Per-day per-store rows from phx_summary_snapshots. We over-fetch on the
+ * range_from window then filter to range_from === range_to in JS (Supabase
+ * REST doesn't expose a column-equality filter directly).
+ *
+ * Returns one row per (store, date) — the source of truth for the dashboard's
+ * per-day revenue + counts.
+ */
+export async function loadPhxDailyRows(
+  from: string,
+  to: string,
+  storeIds: string[],
+): Promise<PhxSnapshot[]> {
+  if (storeIds.length === 0) return [];
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("phx_summary_snapshots")
+    .select("*")
+    .in("store_id", storeIds)
+    .gte("range_from", from)
+    .lte("range_to", to);
+  if (error) throw new Error(`loadPhxDailyRows: ${error.message}`);
+  return ((data ?? []) as PhxSnapshot[]).filter(
+    (r) => r.range_from === r.range_to,
+  );
+}
+
 /** All portfolio snapshots ordered newest period first (for a history grid). */
 export async function loadPortfolioSnapshots(limit = 24): Promise<PhxSnapshot[]> {
   const sb = supabaseAdmin();
@@ -202,6 +233,7 @@ export function aggregateSnapshots(snaps: PhxSnapshot[]): PhxSnapshot | null {
     net_subscribers: null,
     new_subscribers: null,
     cancelled_subscribers_period: null,
+    raw_json: null,
   };
 
   // Sum additive fields across snapshots.

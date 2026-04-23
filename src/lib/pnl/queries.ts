@@ -4,7 +4,7 @@
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import {
-  loadPhxStoreSnapshotsOverlapping,
+  loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
 
@@ -243,15 +243,19 @@ export async function loadDashboardData(
 
 export type BlendedDailyRow = {
   date: string;
-  shopify_revenue: number;
+  shopify_revenue: number; // non-PHX stores only
   shopify_ad_spend: number;
   shopify_net_profit: number;
-  shopify_orders: number;
+  shopify_orders: number; // count, all stores
   shopify_cogs: number;
   shopify_refunds: number;
-  phx_revenue: number; // amortized recurring + salvage
+  phx_revenue: number; // PHX total (frontend + subs + upsell), per-day actual
   phx_net_contribution: number; // phx_revenue × (1 − fee_rate)
-  phx_subs_billed: number; // amortized recurring_subscription_count / period days
+  phx_subs_billed: number; // count of recurring + salvage tx on this day
+  // Per-day actuals from PHX (no amortization), broken out for the table:
+  phx_frontend_revenue: number; // Direct + Initial (Vip Initial included)
+  phx_subs_revenue: number; // Recurring + Salvage
+  phx_upsell_revenue: number;
   total_revenue: number;
   total_net_profit: number;
 };
@@ -265,6 +269,10 @@ export type BlendedTotals = {
   shopify_refunds: number;
   phx_revenue: number;
   phx_net_contribution: number;
+  phx_frontend_revenue: number;
+  phx_subs_revenue: number;
+  phx_upsell_revenue: number;
+  phx_subs_billed: number;
   total_revenue: number;
   total_net_profit: number;
   roas: number; // total_revenue / shopify_ad_spend
@@ -291,66 +299,54 @@ export type BlendedDashboardData = {
   phxSnapshotsUsed: number; // how many PHX snapshots overlapped the range
 };
 
-/**
- * Amortize a single per-store PHX snapshot's revenue (direct + initial +
- * recurring + salvage + upsell — i.e. total) across the days of its period.
- * Returns a Map<date, amortizedTotal>.
- *
- * Used when PHX is the source of truth for a store's revenue: we take every
- * bucket PHX produced and spread it evenly across the reporting period.
- */
-function amortizePhxTotalByDay(snaps: PhxSnapshot[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const s of snaps) {
-    if (!s.range_from || !s.range_to) continue;
-    // Prefer the pre-summed revenue_total; fall back to the buckets.
-    const total =
-      s.revenue_total != null
-        ? Number(s.revenue_total)
-        : Number(s.revenue_direct ?? 0) +
-          Number(s.revenue_initial ?? 0) +
-          Number(s.revenue_recurring ?? 0) +
-          Number(s.revenue_salvage ?? 0) +
-          Number(s.revenue_upsell ?? 0);
-    if (!(total > 0)) continue;
-    const days = diffDays(s.range_from, s.range_to) + 1;
-    if (days <= 0) continue;
-    const perDay = total / days;
-    let cur = s.range_from;
-    for (let i = 0; i < days; i++) {
-      out.set(cur, (out.get(cur) ?? 0) + perDay);
-      cur = addDays(cur, 1);
-    }
-  }
-  return out;
-}
+type PhxDayJson = {
+  recurringCount?: number;
+  salvageCount?: number;
+  directCount?: number;
+  initialCount?: number;
+  upsellCount?: number;
+};
 
-/** Amortize PHX recurring_subscription_count across a snapshot's period days. */
-function amortizeSubsByDay(snaps: PhxSnapshot[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const s of snaps) {
-    if (!s.range_from || !s.range_to) continue;
-    const count = Number(s.recurring_subscription_count ?? 0);
-    if (count <= 0) continue;
-    const days = diffDays(s.range_from, s.range_to) + 1;
-    if (days <= 0) continue;
-    const perDay = count / days;
-    let cur = s.range_from;
-    for (let i = 0; i < days; i++) {
-      out.set(cur, (out.get(cur) ?? 0) + perDay);
-      cur = addDays(cur, 1);
-    }
-  }
-  return out;
-}
+type PhxDayTotals = {
+  frontend: number; // direct + initial
+  subs: number; // recurring + salvage
+  upsell: number;
+  total: number;
+  subsBilledCount: number; // recurringCount + salvageCount
+};
 
 /**
- * Sum multiple per-store amortized day-maps into one portfolio-level map.
+ * Roll up per-day per-store snapshot rows into Map<date, totals> aggregated
+ * across all PHX stores. No amortization — each row already represents one
+ * store's actual transactions on one day.
  */
-function sumMaps(maps: Map<string, number>[]): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const m of maps) {
-    for (const [k, v] of m) out.set(k, (out.get(k) ?? 0) + v);
+function rollupPhxByDay(rows: PhxSnapshot[]): Map<string, PhxDayTotals> {
+  const out = new Map<string, PhxDayTotals>();
+  for (const r of rows) {
+    if (!r.range_from || r.range_from !== r.range_to) continue;
+    const date = r.range_from;
+    const direct = Number(r.revenue_direct ?? 0);
+    const initial = Number(r.revenue_initial ?? 0);
+    const recurring = Number(r.revenue_recurring ?? 0);
+    const salvage = Number(r.revenue_salvage ?? 0);
+    const upsell = Number(r.revenue_upsell ?? 0);
+    const json = (r.raw_json as PhxDayJson | null) ?? {};
+    const recurringCount = Number(json.recurringCount ?? 0);
+    const salvageCount = Number(json.salvageCount ?? 0);
+
+    const cur = out.get(date) ?? {
+      frontend: 0,
+      subs: 0,
+      upsell: 0,
+      total: 0,
+      subsBilledCount: 0,
+    };
+    cur.frontend += direct + initial;
+    cur.subs += recurring + salvage;
+    cur.upsell += upsell;
+    cur.total += direct + initial + recurring + salvage + upsell;
+    cur.subsBilledCount += recurringCount + salvageCount;
+    out.set(date, cur);
   }
   return out;
 }
@@ -385,35 +381,15 @@ export async function loadBlendedDashboardData(
     (r) => r.date >= priorFrom && r.date <= priorTo,
   );
 
-  // Per-store PHX snapshots for both windows — NOT the PORTFOLIO rollup, so
-  // we can amortize each PHX store separately.
+  // Per-day per-store PHX rows for both windows. No amortization — each row
+  // already represents one store's actual transactions on one day.
   const phxStoreIds = stores
     .map((s) => s.id)
     .filter((id) => PHX_STORE_IDS.has(id));
-  const phxCur = await loadPhxStoreSnapshotsOverlapping(from, to, phxStoreIds);
-  const phxPrior = await loadPhxStoreSnapshotsOverlapping(
-    priorFrom,
-    priorTo,
-    phxStoreIds,
-  );
-
-  // Amortize PHX per-day per-store. Subs-billed rolls up across all PHX stores.
-  const phxByDayByStoreCur = new Map<string, Map<string, number>>();
-  const phxByDayByStorePrior = new Map<string, Map<string, number>>();
-  for (const sid of phxStoreIds) {
-    phxByDayByStoreCur.set(
-      sid,
-      amortizePhxTotalByDay(phxCur.filter((s) => s.store_id === sid)),
-    );
-    phxByDayByStorePrior.set(
-      sid,
-      amortizePhxTotalByDay(phxPrior.filter((s) => s.store_id === sid)),
-    );
-  }
-  const phxByDayCur = sumMaps([...phxByDayByStoreCur.values()]);
-  const phxByDayPrior = sumMaps([...phxByDayByStorePrior.values()]);
-  const phxSubsByDayCur = amortizeSubsByDay(phxCur);
-  const phxSubsByDayPrior = amortizeSubsByDay(phxPrior);
+  const phxCur = await loadPhxDailyRows(from, to, phxStoreIds);
+  const phxPrior = await loadPhxDailyRows(priorFrom, priorTo, phxStoreIds);
+  const phxByDayCur = rollupPhxByDay(phxCur);
+  const phxByDayPrior = rollupPhxByDay(phxPrior);
 
   // Split Shopify rows: keep non-PHX-store rows as the revenue source;
   // PHX-store rows only contribute cogs/refunds/ad_spend/orders (revenue is
@@ -426,31 +402,38 @@ export async function loadBlendedDashboardData(
   );
   const shopifyByDatePriorAll = groupByDate(priorPnl);
 
+  const emptyPhxDay: PhxDayTotals = {
+    frontend: 0,
+    subs: 0,
+    upsell: 0,
+    total: 0,
+    subsBilledCount: 0,
+  };
+
   // Build the daily array for the current range (every day in [from..to]).
   const daily: BlendedDailyRow[] = [];
   let cur = from;
   while (cur <= to) {
     const nonPhxShop = aggregate(shopifyByDateNonPhx[cur] ?? []);
     const allShop = aggregate(shopifyByDateAll[cur] ?? []);
-    const phxRev = phxByDayCur.get(cur) ?? 0;
-    const phxContribution = phxRev * (1 - feeRate);
+    const phx = phxByDayCur.get(cur) ?? emptyPhxDay;
+    const phxContribution = phx.total * (1 - feeRate);
     const nonPhxContribution = nonPhxShop.net_profit;
     daily.push({
       date: cur,
-      // "shopify_revenue" now means "revenue from non-PHX Shopify-only stores"
-      // (PHX stores' Shopify-side revenue is replaced with PHX's numbers).
       shopify_revenue: round2(nonPhxShop.revenue),
-      // Ad spend, COGS, refunds, orders cover ALL stores (Shopify still sees
-      // every order — including PHX rebills — so these counts stay authoritative).
       shopify_ad_spend: round2(allShop.ad_spend),
       shopify_net_profit: round2(nonPhxShop.net_profit),
       shopify_orders: allShop.order_count,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
-      phx_revenue: round2(phxRev),
+      phx_revenue: round2(phx.total),
       phx_net_contribution: round2(phxContribution),
-      phx_subs_billed: Math.round(phxSubsByDayCur.get(cur) ?? 0),
-      total_revenue: round2(nonPhxShop.revenue + phxRev),
+      phx_subs_billed: phx.subsBilledCount,
+      phx_frontend_revenue: round2(phx.frontend),
+      phx_subs_revenue: round2(phx.subs),
+      phx_upsell_revenue: round2(phx.upsell),
+      total_revenue: round2(nonPhxShop.revenue + phx.total),
       total_net_profit: round2(nonPhxContribution + phxContribution),
     });
     cur = addDays(cur, 1);
@@ -462,7 +445,7 @@ export async function loadBlendedDashboardData(
   while (curP <= priorTo) {
     const nonPhxShop = aggregate(shopifyByDatePriorNonPhx[curP] ?? []);
     const allShop = aggregate(shopifyByDatePriorAll[curP] ?? []);
-    const phxRev = phxByDayPrior.get(curP) ?? 0;
+    const phx = phxByDayPrior.get(curP) ?? emptyPhxDay;
     priorDaily.push({
       date: curP,
       shopify_revenue: round2(nonPhxShop.revenue),
@@ -471,12 +454,15 @@ export async function loadBlendedDashboardData(
       shopify_orders: allShop.order_count,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
-      phx_revenue: round2(phxRev),
-      phx_net_contribution: round2(phxRev * (1 - feeRate)),
-      phx_subs_billed: Math.round(phxSubsByDayPrior.get(curP) ?? 0),
-      total_revenue: round2(nonPhxShop.revenue + phxRev),
+      phx_revenue: round2(phx.total),
+      phx_net_contribution: round2(phx.total * (1 - feeRate)),
+      phx_subs_billed: phx.subsBilledCount,
+      phx_frontend_revenue: round2(phx.frontend),
+      phx_subs_revenue: round2(phx.subs),
+      phx_upsell_revenue: round2(phx.upsell),
+      total_revenue: round2(nonPhxShop.revenue + phx.total),
       total_net_profit: round2(
-        nonPhxShop.net_profit + phxRev * (1 - feeRate),
+        nonPhxShop.net_profit + phx.total * (1 - feeRate),
       ),
     });
     curP = addDays(curP, 1);
@@ -523,7 +509,11 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_cogs = 0,
     shopify_refunds = 0,
     phx_revenue = 0,
-    phx_net_contribution = 0;
+    phx_net_contribution = 0,
+    phx_frontend_revenue = 0,
+    phx_subs_revenue = 0,
+    phx_upsell_revenue = 0,
+    phx_subs_billed = 0;
   for (const r of rows) {
     shopify_revenue += r.shopify_revenue;
     shopify_ad_spend += r.shopify_ad_spend;
@@ -533,6 +523,10 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_refunds += r.shopify_refunds;
     phx_revenue += r.phx_revenue;
     phx_net_contribution += r.phx_net_contribution;
+    phx_frontend_revenue += r.phx_frontend_revenue;
+    phx_subs_revenue += r.phx_subs_revenue;
+    phx_upsell_revenue += r.phx_upsell_revenue;
+    phx_subs_billed += r.phx_subs_billed;
   }
   const total_revenue = shopify_revenue + phx_revenue;
   const total_net_profit = shopify_net_profit + phx_net_contribution;
@@ -545,6 +539,10 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_refunds: round2(shopify_refunds),
     phx_revenue: round2(phx_revenue),
     phx_net_contribution: round2(phx_net_contribution),
+    phx_frontend_revenue: round2(phx_frontend_revenue),
+    phx_subs_revenue: round2(phx_subs_revenue),
+    phx_upsell_revenue: round2(phx_upsell_revenue),
+    phx_subs_billed,
     total_revenue: round2(total_revenue),
     total_net_profit: round2(total_net_profit),
     roas: shopify_ad_spend > 0 ? total_revenue / shopify_ad_spend : 0,

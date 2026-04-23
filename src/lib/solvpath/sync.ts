@@ -105,6 +105,14 @@ export type RevenueBuckets = {
   upsell: number;
   refundsVoids: number;
   total: number; // direct + initial + recurring + salvage + upsell
+  // Counts per bucket — needed so the dashboard can show "Subs Billed"
+  // (count of recurring + salvage tx on a given day).
+  directCount: number;
+  initialCount: number;
+  recurringCount: number;
+  salvageCount: number;
+  upsellCount: number;
+  refundsVoidsCount: number;
   transactionsSeen: number;
   unknownTypes: Record<string, number>; // tally unclassified Type strings
 };
@@ -118,6 +126,12 @@ function emptyBuckets(): RevenueBuckets {
     upsell: 0,
     refundsVoids: 0,
     total: 0,
+    directCount: 0,
+    initialCount: 0,
+    recurringCount: 0,
+    salvageCount: 0,
+    upsellCount: 0,
+    refundsVoidsCount: 0,
     transactionsSeen: 0,
     unknownTypes: {},
   };
@@ -128,6 +142,21 @@ function roundBuckets(b: RevenueBuckets): RevenueBuckets {
   for (const k of money) b[k] = Math.round(b[k] * 100) / 100;
   return b;
 }
+
+const COUNT_KEY: Record<
+  "direct" | "initial" | "recurring" | "salvage" | "upsell",
+  | "directCount"
+  | "initialCount"
+  | "recurringCount"
+  | "salvageCount"
+  | "upsellCount"
+> = {
+  direct: "directCount",
+  initial: "initialCount",
+  recurring: "recurringCount",
+  salvage: "salvageCount",
+  upsell: "upsellCount",
+};
 
 // ─── Chunked Backfill (resume-safe) ─────────────────────────────────────────
 // Vercel caps serverless functions at 60s on the Pro plan, so a full 10k-
@@ -173,21 +202,39 @@ export type BackfillResult = {
     startPage: number;
     maxCustomers: number;
   };
-  perStore: Record<StoreId, RevenueBuckets>;
-  portfolio: RevenueBuckets;
+  /** Per-(date, store) buckets for THIS chunk only (cumulative DB state lives
+   *  in phx_summary_snapshots after merge). */
+  perDayPerStore: Record<string, Record<StoreId, RevenueBuckets>>;
+  /** Roll-up of perDayPerStore for quick driver-side display. */
+  perStoreTotals: Record<StoreId, RevenueBuckets>;
   progress: BackfillProgress;
   persisted: boolean;
 };
 
+type PerDayPerStore = Map<string, Record<StoreId, RevenueBuckets>>;
+
+function ensureDayBuckets(
+  m: PerDayPerStore,
+  date: string,
+): Record<StoreId, RevenueBuckets> {
+  let day = m.get(date);
+  if (!day) {
+    day = { NOVA: emptyBuckets(), NURA: emptyBuckets(), KOVA: emptyBuckets() };
+    m.set(date, day);
+  }
+  return day;
+}
+
 export async function backfillRevenueForRange(
   opts: BackfillOptions,
 ): Promise<BackfillResult> {
-  const perStore: Record<StoreId, RevenueBuckets> = {
+  const perDayPerStore: PerDayPerStore = new Map();
+  // Roll-up across days, returned for driver-side display + meta.
+  const perStoreTotals: Record<StoreId, RevenueBuckets> = {
     NOVA: emptyBuckets(),
     NURA: emptyBuckets(),
     KOVA: emptyBuckets(),
   };
-  const portfolio = emptyBuckets();
 
   const throttle = opts.throttleMs ?? 150;
   const fromIso = `${opts.from}T00:00:00.000Z`;
@@ -200,7 +247,7 @@ export async function backfillRevenueForRange(
   const deadlineHit = () => Date.now() - startedAt >= deadlineMs;
 
   if (opts.reset) {
-    await deleteSnapshotsForRange(opts.from, opts.to);
+    await deleteSnapshotsTouchingRange(opts.from, opts.to);
   }
 
   let customersSeen = 0;
@@ -256,26 +303,35 @@ export async function backfillRevenueForRange(
           const store = storeFromDomain(tx.Domain);
           if (!store) continue;
 
+          const txDate = tx.Date.slice(0, 10); // YYYY-MM-DD
+          const dayBuckets = ensureDayBuckets(perDayPerStore, txDate);
+          const dayStore = dayBuckets[store];
+          const totalStore = perStoreTotals[store];
+
           const cls = classifyTransaction(tx);
           if (!cls) {
             const key = (tx.Type || "(blank)").trim();
-            perStore[store].unknownTypes[key] =
-              (perStore[store].unknownTypes[key] ?? 0) + Number(tx.Amount ?? 0);
-            portfolio.unknownTypes[key] =
-              (portfolio.unknownTypes[key] ?? 0) + Number(tx.Amount ?? 0);
+            const amt = Number(tx.Amount ?? 0);
+            dayStore.unknownTypes[key] = (dayStore.unknownTypes[key] ?? 0) + amt;
+            totalStore.unknownTypes[key] =
+              (totalStore.unknownTypes[key] ?? 0) + amt;
             continue;
           }
 
-          perStore[store].transactionsSeen += 1;
-          portfolio.transactionsSeen += 1;
+          dayStore.transactionsSeen += 1;
+          totalStore.transactionsSeen += 1;
 
           if ("refundOrVoid" in cls) {
-            perStore[store].refundsVoids += cls.amount;
-            portfolio.refundsVoids += cls.amount;
+            dayStore.refundsVoids += cls.amount;
+            dayStore.refundsVoidsCount += 1;
+            totalStore.refundsVoids += cls.amount;
+            totalStore.refundsVoidsCount += 1;
             continue;
           }
-          perStore[store][cls.bucket] += cls.amount;
-          portfolio[cls.bucket] += cls.amount;
+          dayStore[cls.bucket] += cls.amount;
+          dayStore[COUNT_KEY[cls.bucket]] += 1;
+          totalStore[cls.bucket] += cls.amount;
+          totalStore[COUNT_KEY[cls.bucket]] += 1;
         }
 
         if (throttle > 0) await new Promise((r) => setTimeout(r, throttle));
@@ -306,33 +362,38 @@ export async function backfillRevenueForRange(
 
   if (nextStatus === null && nextPage === null) finished = true;
 
-  // Totals + rounding.
+  // Totals + rounding for each day's per-store buckets.
+  for (const dayBuckets of perDayPerStore.values()) {
+    for (const s of STORE_IDS) {
+      const b = dayBuckets[s];
+      b.total = b.direct + b.initial + b.recurring + b.salvage + b.upsell;
+      roundBuckets(b);
+    }
+  }
+  // Roll-up totals (used in the response, not persisted).
   for (const s of STORE_IDS) {
-    const b = perStore[s];
+    const b = perStoreTotals[s];
     b.total = b.direct + b.initial + b.recurring + b.salvage + b.upsell;
     roundBuckets(b);
   }
-  portfolio.total =
-    portfolio.direct +
-    portfolio.initial +
-    portfolio.recurring +
-    portfolio.salvage +
-    portfolio.upsell;
-  roundBuckets(portfolio);
 
   let persisted = false;
   if (opts.persist !== false && customersSeen > 0) {
-    persisted = await mergeSnapshots(opts.from, opts.to, perStore, portfolio, {
+    persisted = await mergePerDaySnapshots(perDayPerStore, {
       customersSeen,
       customersWithTx,
     });
   }
 
+  // Convert Map to plain object for the JSON response.
+  const perDayObj: Record<string, Record<StoreId, RevenueBuckets>> = {};
+  for (const [d, v] of perDayPerStore) perDayObj[d] = v;
+
   return {
     range: { from: opts.from, to: opts.to },
     chunk: { startStatus, startPage, maxCustomers },
-    perStore,
-    portfolio,
+    perDayPerStore: perDayObj,
+    perStoreTotals,
     progress: {
       customersSeen,
       customersWithTx,
@@ -344,20 +405,31 @@ export async function backfillRevenueForRange(
   };
 }
 
-async function deleteSnapshotsForRange(from: string, to: string): Promise<void> {
+/**
+ * Wipe any phx_summary_snapshots rows that overlap the given window. Used
+ * by reset=1 to clean BOTH old per-period rows (range spans multiple days)
+ * AND prior per-day rows for the same window before a fresh ingest.
+ */
+async function deleteSnapshotsTouchingRange(
+  from: string,
+  to: string,
+): Promise<void> {
   const sb = supabaseAdmin();
   const ids: Array<StoreId | "PORTFOLIO"> = [...STORE_IDS, "PORTFOLIO"];
   const { error } = await sb
     .from("phx_summary_snapshots")
     .delete()
     .in("store_id", ids)
-    .eq("range_from", from)
-    .eq("range_to", to);
-  if (error) throw new Error(`deleteSnapshotsForRange: ${error.message}`);
+    .lte("range_from", to)
+    .gte("range_to", from);
+  if (error)
+    throw new Error(`deleteSnapshotsTouchingRange: ${error.message}`);
 }
 
 type SnapshotRow = {
   store_id: string;
+  range_from: string;
+  range_to: string;
   revenue_direct: number | null;
   revenue_initial: number | null;
   revenue_recurring: number | null;
@@ -368,55 +440,97 @@ type SnapshotRow = {
 };
 
 /**
- * Additively merge this chunk's buckets into the existing snapshot row for
- * each (store, range) — so consecutive invocations accumulate instead of
- * overwriting. raw_json.unknownTypes is union-summed too.
+ * Additively merge per-day per-store buckets into phx_summary_snapshots.
+ * One row per (store, date) is upserted with range_from = range_to = date.
+ * Per-bucket counts and refund tally live in raw_json (no schema change).
  */
-async function mergeSnapshots(
-  from: string,
-  to: string,
-  perStore: Record<StoreId, RevenueBuckets>,
-  portfolio: RevenueBuckets,
+async function mergePerDaySnapshots(
+  perDayPerStore: PerDayPerStore,
   meta: { customersSeen: number; customersWithTx: number },
 ): Promise<boolean> {
-  const sb = supabaseAdmin();
-  const ids: Array<StoreId | "PORTFOLIO"> = [...STORE_IDS, "PORTFOLIO"];
+  if (perDayPerStore.size === 0) return false;
 
+  // Collect (store, date) keys with any signal.
+  const keys: Array<{ store: StoreId; date: string }> = [];
+  for (const [date, byStore] of perDayPerStore) {
+    for (const s of STORE_IDS) {
+      const b = byStore[s];
+      if (
+        b.total > 0 ||
+        b.refundsVoids > 0 ||
+        b.transactionsSeen > 0 ||
+        Object.keys(b.unknownTypes).length > 0
+      ) {
+        keys.push({ store: s, date });
+      }
+    }
+  }
+  if (keys.length === 0) return false;
+
+  const dates = [...new Set(keys.map((k) => k.date))];
+  const sb = supabaseAdmin();
+
+  // Read existing rows for those (store, date) keys. Over-fetch on date and
+  // filter to per-day (range_from = range_to) in JS.
+  const minDate = dates.reduce((a, b) => (a < b ? a : b));
+  const maxDate = dates.reduce((a, b) => (a > b ? a : b));
   const { data: existingRows, error: readErr } = await sb
     .from("phx_summary_snapshots")
     .select(
-      "store_id, revenue_direct, revenue_initial, revenue_recurring, revenue_salvage, revenue_upsell, revenue_total, raw_json",
+      "store_id, range_from, range_to, revenue_direct, revenue_initial, revenue_recurring, revenue_salvage, revenue_upsell, revenue_total, raw_json",
     )
-    .in("store_id", ids)
-    .eq("range_from", from)
-    .eq("range_to", to);
-  if (readErr) throw new Error(`read existing snapshots: ${readErr.message}`);
-  const byStore = new Map<string, SnapshotRow>();
-  for (const r of existingRows ?? []) byStore.set(r.store_id, r as SnapshotRow);
+    .in("store_id", STORE_IDS)
+    .gte("range_from", minDate)
+    .lte("range_to", maxDate);
+  if (readErr) throw new Error(`read per-day snapshots: ${readErr.message}`);
+  const byKey = new Map<string, SnapshotRow>();
+  for (const r of (existingRows as SnapshotRow[]) ?? []) {
+    if (r.range_from !== r.range_to) continue; // skip period rows
+    byKey.set(`${r.store_id}|${r.range_from}`, r);
+  }
 
   const now = new Date();
   const scrape_date = now.toISOString().slice(0, 10);
   const scraped_at = now.toISOString();
 
-  const rows = [
-    ...STORE_IDS.map((s) =>
-      mergeRow(byStore.get(s), s, from, to, scrape_date, scraped_at, perStore[s], meta),
+  const rows = keys.map(({ store, date }) =>
+    mergeDayRow(
+      byKey.get(`${store}|${date}`),
+      store,
+      date,
+      scrape_date,
+      scraped_at,
+      perDayPerStore.get(date)![store],
+      meta,
     ),
-    mergeRow(byStore.get("PORTFOLIO"), "PORTFOLIO", from, to, scrape_date, scraped_at, portfolio, meta),
-  ];
+  );
 
   const { error } = await sb
     .from("phx_summary_snapshots")
     .upsert(rows, { onConflict: "store_id,range_from,range_to" });
-  if (error) throw new Error(`snapshot upsert: ${error.message}`);
+  if (error) throw new Error(`per-day snapshot upsert: ${error.message}`);
   return true;
 }
 
-function mergeRow(
+type DayJson = {
+  source?: string;
+  refundsVoids?: number;
+  refundsVoidsCount?: number;
+  transactionsSeen?: number;
+  unknownTypes?: Record<string, number>;
+  directCount?: number;
+  initialCount?: number;
+  recurringCount?: number;
+  salvageCount?: number;
+  upsellCount?: number;
+  customersSeen?: number;
+  customersWithTx?: number;
+};
+
+function mergeDayRow(
   existing: SnapshotRow | undefined,
-  store_id: string,
-  from: string,
-  to: string,
+  store_id: StoreId,
+  date: string,
   scrape_date: string,
   scraped_at: string,
   chunk: RevenueBuckets,
@@ -425,23 +539,18 @@ function mergeRow(
   const add = (prev: number | null | undefined, next: number): number =>
     Math.round(((Number(prev) || 0) + next) * 100) / 100;
 
-  const prevJson = (existing?.raw_json as {
-    refundsVoids?: number;
-    transactionsSeen?: number;
-    unknownTypes?: Record<string, number>;
-    customersSeen?: number;
-    customersWithTx?: number;
-  } | null) ?? null;
-
-  const mergedUnknown: Record<string, number> = { ...(prevJson?.unknownTypes ?? {}) };
+  const prevJson = (existing?.raw_json as DayJson | null) ?? null;
+  const mergedUnknown: Record<string, number> = {
+    ...(prevJson?.unknownTypes ?? {}),
+  };
   for (const [k, v] of Object.entries(chunk.unknownTypes)) {
     mergedUnknown[k] = Math.round(((mergedUnknown[k] ?? 0) + v) * 100) / 100;
   }
 
   return {
     store_id,
-    range_from: from,
-    range_to: to,
+    range_from: date,
+    range_to: date,
     scrape_date,
     scraped_at,
     revenue_direct: add(existing?.revenue_direct, chunk.direct),
@@ -453,9 +562,16 @@ function mergeRow(
     raw_json: {
       source: "solvpath.backfillRevenueForRange",
       refundsVoids: add(prevJson?.refundsVoids, chunk.refundsVoids),
+      refundsVoidsCount:
+        (prevJson?.refundsVoidsCount ?? 0) + chunk.refundsVoidsCount,
       transactionsSeen:
         (prevJson?.transactionsSeen ?? 0) + chunk.transactionsSeen,
       unknownTypes: mergedUnknown,
+      directCount: (prevJson?.directCount ?? 0) + chunk.directCount,
+      initialCount: (prevJson?.initialCount ?? 0) + chunk.initialCount,
+      recurringCount: (prevJson?.recurringCount ?? 0) + chunk.recurringCount,
+      salvageCount: (prevJson?.salvageCount ?? 0) + chunk.salvageCount,
+      upsellCount: (prevJson?.upsellCount ?? 0) + chunk.upsellCount,
       customersSeen: (prevJson?.customersSeen ?? 0) + meta.customersSeen,
       customersWithTx: (prevJson?.customersWithTx ?? 0) + meta.customersWithTx,
     },
