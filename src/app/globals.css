@@ -2124,6 +2124,14 @@ kbd {
   background: var(--accent-bg);
   color: var(--accent);
 }
+.status-pill.status-warn {
+  background: rgba(255, 176, 32, 0.14);
+  color: var(--warning, #ffb020);
+}
+.status-pill.status-neg {
+  background: var(--negative-bg);
+  color: var(--negative);
+}
 .pill-dot {
   width: 6px;
   height: 6px;

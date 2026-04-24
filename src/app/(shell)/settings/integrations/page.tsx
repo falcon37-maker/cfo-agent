@@ -1,7 +1,37 @@
 import { loadCredentials, zohoEnv } from "@/lib/zoho/tokens";
-import { CheckCircle2, AlertCircle, ExternalLink } from "lucide-react";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { hasStoreCreds } from "@/lib/shopify/stores";
+import {
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  Store as StoreIcon,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
+
+type ShopifyStoreRow = {
+  id: string;
+  name: string;
+  shop_domain: string;
+  is_active: boolean;
+  processing_fee_pct: number | null;
+  last_synced_at?: string | null;
+};
+
+async function loadShopifyStores(): Promise<ShopifyStoreRow[]> {
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("stores")
+    .select("id, name, shop_domain, is_active, processing_fee_pct")
+    .eq("is_active", true)
+    .neq("id", "PORTFOLIO")
+    .neq("id", "__BACKFILL_DEDUPE__")
+    .like("shop_domain", "%.myshopify.com")
+    .order("id");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ShopifyStoreRow[];
+}
 
 export default async function IntegrationsSettingsPage({
   searchParams,
@@ -13,7 +43,10 @@ export default async function IntegrationsSettingsPage({
   }>;
 }) {
   const params = await searchParams;
-  const creds = await loadCredentials();
+  const [creds, shopifyStores] = await Promise.all([
+    loadCredentials(),
+    loadShopifyStores(),
+  ]);
   const { ORG_ID } = zohoEnv();
   const connected = Boolean(creds);
   const expiresAt = creds ? new Date(creds.expires_at) : null;
@@ -43,6 +76,7 @@ export default async function IntegrationsSettingsPage({
         </div>
       ) : null}
 
+      {/* Zoho Books */}
       <div className="integration-list card">
         <div className="integration-row">
           <div className="integration-logo">Z</div>
@@ -92,6 +126,92 @@ export default async function IntegrationsSettingsPage({
               </a>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Shopify Stores */}
+      <div>
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--text)",
+            margin: "8px 0 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <StoreIcon size={14} strokeWidth={2} />
+          Shopify Stores
+        </h3>
+        <div className="section-sub" style={{ marginBottom: 10 }}>
+          Stores that sync directly from Shopify (non-PHX). Revenue lands in
+          the <span className="mono">shopify_revenue</span> column of the
+          dashboard.
+        </div>
+        <div className="integration-list card">
+          {shopifyStores.length === 0 ? (
+            <div
+              className="integration-row"
+              style={{ gridTemplateColumns: "1fr", color: "var(--muted)" }}
+            >
+              No Shopify stores configured yet.
+            </div>
+          ) : (
+            shopifyStores.map((s) => {
+              const credsSet = hasStoreCreds(s.id);
+              return (
+                <div className="integration-row" key={s.id}>
+                  <div className="integration-logo">{s.id.slice(0, 1)}</div>
+                  <div className="integration-head">
+                    <div>
+                      <div className="integration-name">{s.name}</div>
+                      <div className="integration-desc">
+                        <span className="mono">{s.shop_domain}</span>
+                      </div>
+                      <div className="integration-detail">
+                        Fee <span className="mono">
+                          {((s.processing_fee_pct ?? 0) * 100).toFixed(1)}%
+                        </span>
+                        {" · "}
+                        {credsSet ? (
+                          <>
+                            Token set · included in daily cron
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ color: "var(--warning, #ffb020)" }}>
+                              Token missing — add {s.id}_DOMAIN + {s.id}_TOKEN
+                              to Vercel env
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span
+                      className={`status-pill ${credsSet ? "status-pos" : "status-warn"}`}
+                    >
+                      <span className="pill-dot" />
+                      {credsSet ? "Connected" : "Needs token"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div
+          className="section-sub"
+          style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted)" }}
+        >
+          Add-store form with test-connection lands in the next pass. For now,
+          drop <span className="mono">STORECODE_DOMAIN</span> +{" "}
+          <span className="mono">STORECODE_TOKEN</span> into Vercel env vars
+          and insert a matching row in the <span className="mono">stores</span>
+          table; the daily cron picks them up automatically.
         </div>
       </div>
     </div>

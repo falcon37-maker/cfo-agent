@@ -17,6 +17,7 @@ import { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { syncDailyOrders } from "@/lib/shopify/sync";
 import { computeDailyPnl } from "@/lib/pnl/compute";
+import { hasStoreCreds } from "@/lib/shopify/stores";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,7 +78,14 @@ async function handle(request: NextRequest) {
 
   const started = Date.now();
   const results = [];
+  const skipped: string[] = [];
   for (const store of stores ?? []) {
+    // Skip historical / dead stores that have daily_pnl rows but no live
+    // Shopify API credentials (e.g. NEEDOH — CSV-imported).
+    if (!hasStoreCreds(store.id)) {
+      skipped.push(store.id);
+      continue;
+    }
     const date = explicit ?? yesterdayInTz(store.timezone ?? "UTC");
     try {
       const pull = await syncDailyOrders(store.id, date);
@@ -105,6 +113,7 @@ async function handle(request: NextRequest) {
     ranAt: new Date().toISOString(),
     mode: explicit ? "backfill" : "daily-yesterday",
     elapsedMs: Date.now() - started,
+    skipped,
     results,
   });
 }

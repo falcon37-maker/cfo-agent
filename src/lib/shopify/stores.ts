@@ -1,10 +1,12 @@
-// Reads Shopify store credentials from env. One store per <CODE>_DOMAIN / <CODE>_TOKEN pair.
-// `code` is the short uppercase id (e.g. "NOVA") — matches stores.id in the DB.
+// Reads Shopify store credentials. Tonight: env-var only (`<CODE>_DOMAIN` /
+// `<CODE>_TOKEN`). After migration 008 adds `shopify_token` to the stores
+// table, `getStoreCreds()` will prefer DB-stored creds and fall back to
+// env, so admin-added stores work without a redeploy.
 
 export type ShopifyStoreCreds = {
   code: string;
   domain: string; // e.g. "nova-store.myshopify.com"
-  token: string; // Admin API access token, shpat_...
+  token: string; // Admin API access token — shpat_... or shpss_...
 };
 
 export function getStoreCreds(code: string): ShopifyStoreCreds {
@@ -18,6 +20,14 @@ export function getStoreCreds(code: string): ShopifyStoreCreds {
     );
   }
   return { code: upper, domain, token };
+}
+
+/** True if this store has Shopify API credentials configured. Used by the
+ *  cron to skip historical / dead stores (e.g. NEEDOH) whose daily_pnl
+ *  rows are managed by one-off CSV imports, not the live Shopify API. */
+export function hasStoreCreds(code: string): boolean {
+  const upper = code.toUpperCase();
+  return Boolean(process.env[`${upper}_DOMAIN`] && process.env[`${upper}_TOKEN`]);
 }
 
 export function listConfiguredStores(): string[] {
