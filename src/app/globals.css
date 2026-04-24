@@ -361,6 +361,54 @@ kbd {
   color: var(--text);
   border-color: var(--border-strong);
 }
+.icon-btn.danger:hover {
+  color: var(--negative);
+  border-color: var(--negative);
+  background: var(--negative-bg);
+}
+
+/* Entry history table — audit log with inline edit + delete */
+.entry-history .row-actions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.entry-history .row-actions .icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+.entry-history tr.edit-row td,
+.entry-history tr.confirm-row td {
+  background: var(--surface-2);
+  padding: 14px;
+}
+.inline-edit-form {
+  display: block;
+}
+.inline-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+.inline-edit-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.inline-edit-actions .primary-btn {
+  padding: 6px 10px;
+}
+@media (max-width: 1100px) {
+  .inline-edit-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .inline-edit-actions {
+    grid-column: span 2;
+    justify-content: flex-end;
+  }
+}
 .theme-toggle {
   display: inline-flex;
   align-items: center;

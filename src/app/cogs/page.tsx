@@ -28,7 +28,7 @@ async function loadRecent() {
     .from("cogs_entries")
     .select("id, store_id, date, cogs")
     .order("submitted_at", { ascending: false })
-    .limit(6);
+    .limit(30);
   if (error) throw new Error(error.message);
   return (
     (data ?? []).map((r) => ({

@@ -16,14 +16,18 @@ export function AmountInput({
   name,
   placeholder = "0.00",
   required = true,
+  defaultValue,
   onValueChange,
 }: {
   name: string;
   placeholder?: string;
   required?: boolean;
+  defaultValue?: string;
   onValueChange?: (n: number) => void;
 }) {
-  const [display, setDisplay] = useState("");
+  const [display, setDisplay] = useState(
+    defaultValue ? formatAmountInput(parseLooseNumber(defaultValue)) : "",
+  );
   const parsed = parseLooseNumber(display);
 
   return (

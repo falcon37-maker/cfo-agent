@@ -5,8 +5,13 @@ import { Check } from "lucide-react";
 import { StoreSelect, type StoreOption } from "@/components/entry/StoreSelect";
 import { DatePicker } from "@/components/entry/DatePicker";
 import { AmountInput } from "@/components/entry/AmountInput";
-import { fmtMoney, fmtDate } from "@/lib/format";
-import { submitCogsAction } from "./actions";
+import { EntryHistoryRow } from "@/components/entry/EntryHistoryRow";
+import { fmtDate } from "@/lib/format";
+import {
+  submitCogsAction,
+  updateCogsEntryAction,
+  deleteCogsEntryAction,
+} from "./actions";
 
 type Recent = {
   id: string;
@@ -144,32 +149,44 @@ export function CogsForm({
         <div className="card">
           <div className="card-head">
             <div>
-              <div className="card-title small">Recent entries</div>
-              <div className="card-sub">Last {recent.length} · across stores</div>
+              <div className="card-title small">History</div>
+              <div className="card-sub">
+                Most recent {recent.length} · click the pencil to edit, trash to delete
+              </div>
             </div>
           </div>
-          <table className="pnl-table">
+          <table className="pnl-table entry-history">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Store</th>
                 <th className="num">Amount</th>
+                <th className="num" style={{ width: 80 }}></th>
               </tr>
             </thead>
             <tbody>
               {recent.length === 0 ? (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>
+                  <td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>
                     No submissions yet.
                   </td>
                 </tr>
               ) : (
                 recent.map((r) => (
-                  <tr key={r.id}>
-                    <td>{fmtDate(r.date)}</td>
-                    <td style={{ color: "var(--text)" }}>{r.store_id}</td>
-                    <td className="num">{fmtMoney(r.cogs)}</td>
-                  </tr>
+                  <EntryHistoryRow
+                    key={r.id}
+                    entry={{
+                      id: r.id,
+                      store_id: r.store_id,
+                      date: r.date,
+                      amount: r.cogs,
+                    }}
+                    stores={stores}
+                    today={today}
+                    amountName="cogs"
+                    editAction={updateCogsEntryAction}
+                    deleteAction={deleteCogsEntryAction}
+                  />
                 ))
               )}
             </tbody>
