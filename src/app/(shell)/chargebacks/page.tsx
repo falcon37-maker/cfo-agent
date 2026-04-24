@@ -72,22 +72,19 @@ async function loadAlertsInWindow(
 async function loadTransactionsInWindow(
   from: string,
   to: string,
-): Promise<{ total: number; byStore: Record<string, number> }> {
+): Promise<number> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("daily_pnl")
-    .select("store_id, order_count")
+    .select("order_count")
     .gte("date", from)
     .lte("date", to);
-  if (error || !data) return { total: 0, byStore: {} };
-  const byStore: Record<string, number> = {};
+  if (error || !data) return 0;
   let total = 0;
-  for (const r of data as Array<{ store_id: string; order_count: number | null }>) {
-    const c = Number(r.order_count ?? 0);
-    total += c;
-    byStore[r.store_id] = (byStore[r.store_id] ?? 0) + c;
+  for (const r of data as Array<{ order_count: number | null }>) {
+    total += Number(r.order_count ?? 0);
   }
-  return { total, byStore };
+  return total;
 }
 
 export default async function ChargebacksPage({
@@ -107,7 +104,7 @@ export default async function ChargebacksPage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
-  const [alerts, tx] = await Promise.all([
+  const [alerts, txTotal] = await Promise.all([
     loadAlertsInWindow(from, to),
     loadTransactionsInWindow(from, to),
   ]);
@@ -124,46 +121,10 @@ export default async function ChargebacksPage({
   const alertAmount = alerts.reduce((s, a) => s + Number(a.amount ?? 0), 0);
   const avgPerAlert = totalAlerts > 0 ? alertAmount / totalAlerts : 0;
 
-  const ratioPct = tx.total > 0 ? (totalAlerts / tx.total) * 100 : 0;
+  // All stores share a single Chargeblast merchant descriptor today, so the
+  // denominator is portfolio-wide transaction count.
+  const ratioPct = txTotal > 0 ? (totalAlerts / txTotal) * 100 : 0;
   const ratioTone_ = ratioTone(ratioPct);
-
-  // Per-store aggregation — skip rows with no store_id (unmapped descriptors).
-  const perStore: Record<
-    string,
-    {
-      total: number;
-      won: number;
-      lost: number;
-      pending: number;
-      amount: number;
-      orders: number;
-    }
-  > = {};
-  for (const a of alerts) {
-    if (!a.store_id) continue;
-    const s = (perStore[a.store_id] ||= {
-      total: 0,
-      won: 0,
-      lost: 0,
-      pending: 0,
-      amount: 0,
-      orders: tx.byStore[a.store_id] ?? 0,
-    });
-    s.total += 1;
-    if (a.status === "won") s.won += 1;
-    if (a.status === "lost") s.lost += 1;
-    if (a.status === "pending") s.pending += 1;
-    s.amount += Number(a.amount ?? 0);
-  }
-  const perStoreRows = Object.entries(perStore)
-    .map(([id, v]) => ({
-      id,
-      ...v,
-      ratio: v.orders > 0 ? (v.total / v.orders) * 100 : 0,
-    }))
-    .sort((a, b) => b.total - a.total);
-
-  const unmappedCount = alerts.filter((a) => !a.store_id).length;
 
   function qs(p: Record<string, string>): string {
     const sp = new URLSearchParams();
@@ -218,9 +179,9 @@ export default async function ChargebacksPage({
         <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
           No Chargeblast alerts in this window.
           {" "}
-          {tx.total === 0
+          {txTotal === 0
             ? "Also no transactions — try a wider range."
-            : `${fmtInt(tx.total)} transactions processed.`}
+            : `${fmtInt(txTotal)} transactions processed.`}
           <div style={{ marginTop: 10, fontSize: 11.5 }}>
             If you&apos;ve just connected Chargeblast, trigger a manual sync at{" "}
             <code className="mono">/api/sync/chargeblast?action=backfill</code>.
@@ -236,7 +197,7 @@ export default async function ChargebacksPage({
             label="Total Alerts"
             value={fmtInt(totalAlerts)}
             delta={null}
-            deltaLabel={`${fmtInt(tx.total)} tx processed`}
+            deltaLabel={`${fmtInt(txTotal)} tx processed`}
             spark={[]}
             icon={<ShieldAlert size={14} strokeWidth={1.75} />}
           />
@@ -280,70 +241,6 @@ export default async function ChargebacksPage({
         </div>
       </section>
 
-      {/* ── Per-store table ── */}
-      {perStoreRows.length > 0 ? (
-        <section>
-          <div className="section-eyebrow">Per-store</div>
-          <div className="card table-card">
-            <div className="table-wrap">
-              <table className="pnl-table">
-                <thead>
-                  <tr>
-                    <th>Store</th>
-                    <th className="num">Alerts</th>
-                    <th className="num">Won</th>
-                    <th className="num">Lost</th>
-                    <th className="num">Pending</th>
-                    <th className="num">Ratio</th>
-                    <th className="num">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {perStoreRows.map((r) => {
-                    const tone = ratioTone(r.ratio);
-                    return (
-                      <tr key={r.id}>
-                        <td>{r.id}</td>
-                        <td className="num">{fmtInt(r.total)}</td>
-                        <td className="num" style={{ color: "var(--accent)" }}>
-                          {fmtInt(r.won)}
-                        </td>
-                        <td className="num" style={{ color: "var(--negative)" }}>
-                          {fmtInt(r.lost)}
-                        </td>
-                        <td className="num muted">{fmtInt(r.pending)}</td>
-                        <td
-                          className="num"
-                          style={{
-                            color:
-                              tone === "pos"
-                                ? "var(--accent)"
-                                : tone === "warn"
-                                  ? "var(--warning, #ffb020)"
-                                  : "var(--negative)",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {r.ratio.toFixed(2)}%
-                        </td>
-                        <td className="num">{fmtMoney(r.amount)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {unmappedCount > 0 ? (
-            <div className="section-sub" style={{ marginTop: 8, color: "var(--warning, #ffb020)" }}>
-              {unmappedCount} alert{unmappedCount === 1 ? "" : "s"} couldn&apos;t
-              be matched to a store. Set each store&apos;s Chargeblast
-              merchant descriptor in Settings → Integrations.
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
       {/* ── Recent alerts feed ── */}
       {alerts.length > 0 ? (
         <section>
@@ -354,7 +251,6 @@ export default async function ChargebacksPage({
                 <thead>
                   <tr>
                     <th>Date</th>
-                    <th>Store</th>
                     <th>Card</th>
                     <th>Type</th>
                     <th className="num">Amount</th>
@@ -380,7 +276,6 @@ export default async function ChargebacksPage({
                             ? `${dt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} ${dt.toISOString().slice(11, 16)}Z`
                             : "—"}
                         </td>
-                        <td>{a.store_id ?? <span className="muted">(unmapped)</span>}</td>
                         <td className="muted">{(a.card_brand ?? "").toUpperCase()}</td>
                         <td className="muted">{a.alert_type}</td>
                         <td className="num">{fmtMoney(Number(a.amount ?? 0))}</td>

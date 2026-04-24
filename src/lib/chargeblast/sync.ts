@@ -14,24 +14,48 @@ export type SyncResult = {
   skippedErrors: number;
 };
 
-async function loadDescriptorMap(): Promise<Map<string, string>> {
+// Alphanumeric-only, lowercased. Chargeblast descriptors come in many
+// variants per store (e.g. "NOVASENSE-USA.STORE", "novasense-usa.store-CB-Dev1",
+// "NOVASENSE USA STORE 56700RIVERTON WY") — normalizing strips punctuation and
+// trailing city/state noise so substring matching works.
+function normalizeDescriptor(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+type DescriptorEntry = { storeId: string; needle: string };
+
+async function loadDescriptorMap(): Promise<DescriptorEntry[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("stores")
     .select("id, chargeblast_descriptor")
     .not("chargeblast_descriptor", "is", null);
   if (error) throw new Error(`loadDescriptorMap: ${error.message}`);
-  const out = new Map<string, string>();
+  const out: DescriptorEntry[] = [];
   for (const r of (data ?? []) as Array<{ id: string; chargeblast_descriptor: string | null }>) {
-    if (r.chargeblast_descriptor) {
-      out.set(r.chargeblast_descriptor.trim().toLowerCase(), r.id);
-    }
+    const needle = normalizeDescriptor(r.chargeblast_descriptor ?? "");
+    if (needle) out.push({ storeId: r.id, needle });
   }
+  // Longer needles first so more-specific stores win ties.
+  out.sort((a, b) => b.needle.length - a.needle.length);
   return out;
 }
 
+function matchDescriptor(
+  descriptor: string | null,
+  entries: DescriptorEntry[],
+): string | null {
+  if (!descriptor) return null;
+  const hay = normalizeDescriptor(descriptor);
+  if (!hay) return null;
+  for (const e of entries) {
+    if (hay.includes(e.needle)) return e.storeId;
+  }
+  return null;
+}
+
 export async function syncAlerts(filters: AlertFilters = {}): Promise<SyncResult> {
-  const descriptorToStore = await loadDescriptorMap();
+  const descriptorEntries = await loadDescriptorMap();
   const sb = supabaseAdmin();
 
   let seen = 0;
@@ -58,8 +82,7 @@ export async function syncAlerts(filters: AlertFilters = {}): Promise<SyncResult
 
   for await (const a of iterateAlerts(filters)) {
     seen += 1;
-    const descKey = (a.merchant_descriptor ?? "").trim().toLowerCase();
-    const storeId = descKey ? descriptorToStore.get(descKey) ?? null : null;
+    const storeId = matchDescriptor(a.merchant_descriptor, descriptorEntries);
     if (storeId) mapped += 1;
     else unmapped += 1;
 
