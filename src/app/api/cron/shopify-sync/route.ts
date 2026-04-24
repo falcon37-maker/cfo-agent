@@ -19,7 +19,11 @@ import { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { syncDailyOrders } from "@/lib/shopify/sync";
 import { computeDailyPnl } from "@/lib/pnl/compute";
-import { hasStoreCreds, listConfiguredStores } from "@/lib/shopify/stores";
+import {
+  hasStoreCreds,
+  listConfiguredStores,
+  describeConfiguredTokens,
+} from "@/lib/shopify/stores";
 import { syncAlerts } from "@/lib/chargeblast/sync";
 
 export const runtime = "nodejs";
@@ -144,6 +148,7 @@ async function handle(request: NextRequest) {
     elapsedMs: Date.now() - started,
     skipped,
     configuredInEnv: listConfiguredStores(),
+    tokenShapes: describeConfiguredTokens(),
     results,
     chargeblast,
   });

@@ -40,3 +40,21 @@ export function listConfiguredStores(): string[] {
   }
   return Array.from(codes).sort();
 }
+
+/** Diagnostic only — returns each configured store's token prefix (e.g. "shpat_")
+ *  so we can tell at a glance whether Vercel is holding the Admin-API token we
+ *  expect vs. a leftover session token. Does not leak the secret. */
+export function describeConfiguredTokens(): Array<{
+  code: string;
+  tokenPrefix: string;
+  tokenLength: number;
+}> {
+  return listConfiguredStores().map((code) => {
+    const tok = process.env[`${code}_TOKEN`] ?? "";
+    return {
+      code,
+      tokenPrefix: tok.slice(0, 7),
+      tokenLength: tok.length,
+    };
+  });
+}
