@@ -8,8 +8,7 @@ const TITLES: Record<string, { title: string; crumb: string; sub?: string }> = {
   "/": { title: "Dashboard", crumb: "Dashboard" },
   "/pnl": { title: "P&L · Shopify", crumb: "P&L" },
   "/subscriptions": { title: "Subscriptions", crumb: "Subscriptions" },
-  "/cash": { title: "Cash Flow", crumb: "Cash Flow" },
-  "/accounting": { title: "Accounting", crumb: "Accounting" },
+  "/chargebacks": { title: "Chargebacks", crumb: "Chargebacks" },
   "/calculator": { title: "Unit Economics Calculator", crumb: "Calculator" },
   "/settings": { title: "Settings", crumb: "Settings" },
 };

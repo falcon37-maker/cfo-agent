@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ExternalLink,
   Store as StoreIcon,
+  ShieldAlert,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -150,6 +151,7 @@ export default async function IntegrationsSettingsPage({
           the <span className="mono">shopify_revenue</span> column of the
           dashboard.
         </div>
+        {/* Chargeblast section rendered at bottom */}
         <div className="integration-list card">
           {shopifyStores.length === 0 ? (
             <div
@@ -212,6 +214,86 @@ export default async function IntegrationsSettingsPage({
           <span className="mono">STORECODE_TOKEN</span> into Vercel env vars
           and insert a matching row in the <span className="mono">stores</span>
           table; the daily cron picks them up automatically.
+        </div>
+      </div>
+
+      {/* Chargeblast */}
+      <div>
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--text)",
+            margin: "8px 0 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <ShieldAlert size={14} strokeWidth={2} />
+          Chargeblast
+        </h3>
+        <div className="section-sub" style={{ marginBottom: 10 }}>
+          Ethoca / CDRN chargeback alerts. Feeds the{" "}
+          <a href="/chargebacks" className="mono" style={{ color: "var(--accent)" }}>
+            /chargebacks
+          </a>{" "}
+          page.
+        </div>
+        <div className="integration-list card">
+          <div className="integration-row">
+            <div className="integration-logo">C</div>
+            <div className="integration-head">
+              <div>
+                <div className="integration-name">Chargeblast</div>
+                <div className="integration-desc">
+                  Webhook URL (paste into Chargeblast dashboard):{" "}
+                  <span className="mono" style={{ color: "var(--text)" }}>
+                    https://app.cfo-agent.ai/api/webhooks/chargeblast
+                  </span>
+                </div>
+                <div className="integration-detail">
+                  API key status:{" "}
+                  {process.env.CHARGEBLAST_API_KEY ? (
+                    <span style={{ color: "var(--accent)" }}>set</span>
+                  ) : (
+                    <span style={{ color: "var(--warning, #ffb020)" }}>
+                      set <span className="mono">CHARGEBLAST_API_KEY</span> in Vercel env
+                    </span>
+                  )}
+                  {" · "}
+                  Webhook secret:{" "}
+                  {process.env.CHARGEBLAST_WEBHOOK_SECRET ? (
+                    <span style={{ color: "var(--accent)" }}>set</span>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>not set (live events off)</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span
+                className={`status-pill ${process.env.CHARGEBLAST_API_KEY ? "status-pos" : "status-warn"}`}
+              >
+                <span className="pill-dot" />
+                {process.env.CHARGEBLAST_API_KEY ? "Connected" : "Needs key"}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div
+          className="section-sub"
+          style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted)" }}
+        >
+          Manual sync:{" "}
+          <span className="mono">
+            GET /api/sync/chargeblast?action=backfill&amp;from=YYYY-MM-DD&amp;to=YYYY-MM-DD
+          </span>{" "}
+          with Bearer <span className="mono">CRON_SECRET</span>. Each store&apos;s
+          merchant descriptor must be populated in the{" "}
+          <span className="mono">stores.chargeblast_descriptor</span> column for
+          alerts to attribute correctly — auto-detect UI lands in the follow-up
+          pass.
         </div>
       </div>
     </div>

@@ -6,14 +6,13 @@ import {
   LayoutDashboard,
   LineChart,
   Repeat,
-  Banknote,
-  FileSpreadsheet,
   Settings,
   Search,
   LogOut,
   Calculator,
   CheckSquare,
   Megaphone,
+  ShieldAlert,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
 import type { Role } from "@/lib/auth/roles";
@@ -31,8 +30,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pnl", label: "P&L · Shopify", icon: LineChart },
   { href: "/subscriptions", label: "Subscriptions · PHX", icon: Repeat },
-  { href: "/cash", label: "Cash Flow", icon: Banknote },
-  { href: "/accounting", label: "Accounting", icon: FileSpreadsheet },
+  { href: "/chargebacks", label: "Chargebacks", icon: ShieldAlert },
   { href: "/calculator", label: "Calculator", icon: Calculator },
   { href: "/cogs", label: "Log COGS", icon: CheckSquare },
   { href: "/ads", label: "Log Ad Spend", icon: Megaphone, roles: ["admin"] },

@@ -18,6 +18,8 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/cron/")) return true;
   // Same pattern for Solvpath sync endpoint (cron-secret auth, not session).
   if (pathname.startsWith("/api/sync/solvpath")) return true;
+  if (pathname.startsWith("/api/sync/chargeblast")) return true;
+  if (pathname.startsWith("/api/webhooks/")) return true;
   return false;
 }
 
