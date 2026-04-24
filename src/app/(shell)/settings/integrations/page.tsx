@@ -2,11 +2,17 @@ import { loadCredentials, zohoEnv } from "@/lib/zoho/tokens";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hasStoreCreds } from "@/lib/shopify/stores";
 import {
+  pingChargeblastAction,
+  syncChargeblastAction,
+} from "./actions";
+import {
   CheckCircle2,
   AlertCircle,
   ExternalLink,
   Store as StoreIcon,
   ShieldAlert,
+  Zap,
+  RefreshCw,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +47,13 @@ export default async function IntegrationsSettingsPage({
     zoho_connected?: string;
     zoho_disconnected?: string;
     zoho_error?: string;
+    cb_test?: string;
+    cb_sync?: string;
+    cb_msg?: string;
+    cb_total?: string;
+    cb_seen?: string;
+    cb_mapped?: string;
+    cb_upserted?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -74,6 +87,31 @@ export default async function IntegrationsSettingsPage({
         <div className="inline-banner banner-neg">
           <AlertCircle size={14} strokeWidth={2} />
           Zoho OAuth failed: {params.zoho_error}
+        </div>
+      ) : null}
+      {params.cb_test === "ok" ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Chargeblast reachable · {params.cb_total} alerts visible.
+        </div>
+      ) : null}
+      {params.cb_test === "fail" ? (
+        <div className="inline-banner banner-neg">
+          <AlertCircle size={14} strokeWidth={2} />
+          Chargeblast ping failed: {params.cb_msg ?? "unknown error"}
+        </div>
+      ) : null}
+      {params.cb_sync === "ok" ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Chargeblast synced · {params.cb_seen} seen, {params.cb_mapped} mapped,
+          {" "}{params.cb_upserted} upserted.
+        </div>
+      ) : null}
+      {params.cb_sync === "fail" ? (
+        <div className="inline-banner banner-neg">
+          <AlertCircle size={14} strokeWidth={2} />
+          Chargeblast sync failed: {params.cb_msg ?? "unknown error"}
         </div>
       ) : null}
 
@@ -278,6 +316,22 @@ export default async function IntegrationsSettingsPage({
                 <span className="pill-dot" />
                 {process.env.CHARGEBLAST_API_KEY ? "Connected" : "Needs key"}
               </span>
+              {process.env.CHARGEBLAST_API_KEY ? (
+                <>
+                  <form action={pingChargeblastAction} style={{ display: "inline" }}>
+                    <button type="submit" className="ghost-btn">
+                      <Zap size={13} strokeWidth={2} />
+                      Test
+                    </button>
+                  </form>
+                  <form action={syncChargeblastAction} style={{ display: "inline" }}>
+                    <button type="submit" className="primary-btn">
+                      <RefreshCw size={13} strokeWidth={2} />
+                      Run sync
+                    </button>
+                  </form>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -285,15 +339,12 @@ export default async function IntegrationsSettingsPage({
           className="section-sub"
           style={{ marginTop: 10, fontSize: 11.5, color: "var(--muted)" }}
         >
-          Manual sync:{" "}
-          <span className="mono">
-            GET /api/sync/chargeblast?action=backfill&amp;from=YYYY-MM-DD&amp;to=YYYY-MM-DD
-          </span>{" "}
-          with Bearer <span className="mono">CRON_SECRET</span>. Each store&apos;s
-          merchant descriptor must be populated in the{" "}
-          <span className="mono">stores.chargeblast_descriptor</span> column for
-          alerts to attribute correctly — auto-detect UI lands in the follow-up
-          pass.
+          <strong>Test</strong> pings the Chargeblast API.{" "}
+          <strong>Run sync</strong> pulls the last 7 days of alerts and upserts
+          them — same call the daily cron makes. API key is set via{" "}
+          <span className="mono">CHARGEBLAST_API_KEY</span> in Vercel env;
+          rotate it there. Merchant-descriptor to store mapping lives in{" "}
+          <span className="mono">stores.chargeblast_descriptor</span>.
         </div>
       </div>
     </div>

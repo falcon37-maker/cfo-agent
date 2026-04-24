@@ -1,10 +1,12 @@
-// Daily Shopify sync — triggered by Vercel cron (see vercel.json).
+// Daily sync — triggered by Vercel cron (see vercel.json).
 //
 // For every active non-portfolio store:
 //   1. Pull YESTERDAY's orders from Shopify (in the store's local timezone).
 //      We finalize the just-completed day rather than the still-in-progress
 //      current day; "today" at midnight PST hasn't accumulated any orders yet.
 //   2. Recompute daily_pnl for that (store, date) row.
+// Then pulls the last 7 days of Chargeblast alerts — the 7-day window catches
+// both brand-new alerts and status updates (won/lost) on recent alerts.
 //
 // Query params (optional):
 //   - date=YYYY-MM-DD  → sync this exact date for every store (backfill).
@@ -18,6 +20,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { syncDailyOrders } from "@/lib/shopify/sync";
 import { computeDailyPnl } from "@/lib/pnl/compute";
 import { hasStoreCreds } from "@/lib/shopify/stores";
+import { syncAlerts } from "@/lib/chargeblast/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,6 +111,32 @@ async function handle(request: NextRequest) {
     }
   }
 
+  // Chargeblast pull — last 7 days so status updates on older alerts flow in.
+  // Wrapped in try/catch so a Chargeblast failure doesn't mask Shopify results.
+  let chargeblast: {
+    ok: boolean;
+    seen?: number;
+    mapped?: number;
+    unmapped?: number;
+    upserted?: number;
+    error?: string;
+  } = { ok: false };
+  if (process.env.CHARGEBLAST_API_KEY) {
+    const today = new Date().toISOString().slice(0, 10);
+    const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+    try {
+      const r = await syncAlerts({ start_date: weekAgo, end_date: today });
+      chargeblast = { ok: true, ...r };
+    } catch (err) {
+      chargeblast = {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  } else {
+    chargeblast = { ok: false, error: "CHARGEBLAST_API_KEY not set" };
+  }
+
   return Response.json({
     ok: true,
     ranAt: new Date().toISOString(),
@@ -115,6 +144,7 @@ async function handle(request: NextRequest) {
     elapsedMs: Date.now() - started,
     skipped,
     results,
+    chargeblast,
   });
 }
 

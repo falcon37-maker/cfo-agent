@@ -3,6 +3,7 @@ import { fmtDate, fmtMoney, fmtInt } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { ChargebacksTimelineChart } from "@/components/chargebacks/TimelineChart";
 import { ShieldAlert, Trophy, Gauge, Coins } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -72,19 +73,50 @@ async function loadAlertsInWindow(
 async function loadTransactionsInWindow(
   from: string,
   to: string,
-): Promise<number> {
+): Promise<{ total: number; perDay: Map<string, number> }> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("daily_pnl")
-    .select("order_count")
+    .select("date, order_count")
     .gte("date", from)
     .lte("date", to);
-  if (error || !data) return 0;
+  if (error || !data) return { total: 0, perDay: new Map() };
+  const perDay = new Map<string, number>();
   let total = 0;
-  for (const r of data as Array<{ order_count: number | null }>) {
-    total += Number(r.order_count ?? 0);
+  for (const r of data as Array<{ date: string; order_count: number | null }>) {
+    const c = Number(r.order_count ?? 0);
+    total += c;
+    perDay.set(r.date, (perDay.get(r.date) ?? 0) + c);
   }
-  return total;
+  return { total, perDay };
+}
+
+function buildTimeline(
+  from: string,
+  to: string,
+  alerts: AlertRow[],
+  orderCountByDay: Map<string, number>,
+): Array<{ date: string; alerts: number; orders: number }> {
+  const alertsByDay = new Map<string, number>();
+  for (const a of alerts) {
+    if (!a.chargeblast_created_at) continue;
+    const date = a.chargeblast_created_at.slice(0, 10);
+    alertsByDay.set(date, (alertsByDay.get(date) ?? 0) + 1);
+  }
+  const days: Array<{ date: string; alerts: number; orders: number }> = [];
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const cursor = new Date(Date.UTC(fy, fm - 1, fd));
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor.getTime() <= end.getTime()) {
+    const iso = cursor.toISOString().slice(0, 10);
+    days.push({
+      date: iso,
+      alerts: alertsByDay.get(iso) ?? 0,
+      orders: orderCountByDay.get(iso) ?? 0,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
 }
 
 export default async function ChargebacksPage({
@@ -104,10 +136,12 @@ export default async function ChargebacksPage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
-  const [alerts, txTotal] = await Promise.all([
+  const [alerts, tx] = await Promise.all([
     loadAlertsInWindow(from, to),
     loadTransactionsInWindow(from, to),
   ]);
+  const txTotal = tx.total;
+  const timeline = buildTimeline(from, to, alerts, tx.perDay);
 
   const totalAlerts = alerts.length;
   const wonCount = alerts.filter((a) => a.status === "won").length;
@@ -240,6 +274,16 @@ export default async function ChargebacksPage({
           />
         </div>
       </section>
+
+      {/* ── Timeline chart ── */}
+      {timeline.length > 0 ? (
+        <section>
+          <div className="section-eyebrow">Alerts over time</div>
+          <div className="card" style={{ padding: 16 }}>
+            <ChargebacksTimelineChart days={timeline} />
+          </div>
+        </section>
+      ) : null}
 
       {/* ── Recent alerts feed ── */}
       {alerts.length > 0 ? (
