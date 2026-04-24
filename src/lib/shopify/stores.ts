@@ -1,25 +1,65 @@
-// Reads Shopify store credentials. Tonight: env-var only (`<CODE>_DOMAIN` /
-// `<CODE>_TOKEN`). After migration 008 adds `shopify_token` to the stores
-// table, `getStoreCreds()` will prefer DB-stored creds and fall back to
-// env, so admin-added stores work without a redeploy.
+// Reads Shopify store credentials from env.
+//
+// Two auth modes are supported:
+//
+//  1. Legacy custom-app token (used by NOVA/NURA/KOVA — created pre-Jan 2026):
+//       {CODE}_DOMAIN=...
+//       {CODE}_TOKEN=shpat_...
+//     We hand the static token to the Admin API in X-Shopify-Access-Token.
+//
+//  2. OAuth client credentials (Shopify deprecated custom apps in Jan 2026 — any
+//     store created after that uses the Dev Dashboard flow, which issues a
+//     Client ID + Client Secret instead):
+//       {CODE}_DOMAIN=...
+//       {CODE}_CLIENT_ID=...
+//       {CODE}_TOKEN=shpss_...        ← this is the Client Secret
+//     The client exchanges these at request time for an access_token and
+//     caches it in-process (see client.ts).
+//
+// We key off the token prefix — shpat_ means static, shpss_ means OAuth.
 
 export type ShopifyStoreCreds = {
   code: string;
-  domain: string; // e.g. "nova-store.myshopify.com"
-  token: string; // Admin API access token — shpat_... or shpss_...
+  domain: string;
+  /** Set when the store uses a legacy static access token. */
+  accessToken?: string;
+  /** Set when the store uses OAuth client credentials. */
+  clientId?: string;
+  clientSecret?: string;
 };
 
 export function getStoreCreds(code: string): ShopifyStoreCreds {
   const upper = code.toUpperCase();
   const domain = process.env[`${upper}_DOMAIN`];
-  const token = process.env[`${upper}_TOKEN`];
-  if (!domain || !token) {
+  const rawToken = process.env[`${upper}_TOKEN`];
+  const clientId = process.env[`${upper}_CLIENT_ID`];
+
+  if (!domain || !rawToken) {
     throw new Error(
       `No Shopify credentials configured for store "${upper}". ` +
-        `Set ${upper}_DOMAIN and ${upper}_TOKEN in .env.local.`,
+        `Set ${upper}_DOMAIN and ${upper}_TOKEN in env.`,
     );
   }
-  return { code: upper, domain, token };
+
+  if (rawToken.startsWith("shpat_")) {
+    return { code: upper, domain, accessToken: rawToken };
+  }
+
+  if (rawToken.startsWith("shpss_")) {
+    if (!clientId) {
+      throw new Error(
+        `Store "${upper}" has an OAuth client secret (${upper}_TOKEN=shpss_...) ` +
+          `but no ${upper}_CLIENT_ID. Add the Client ID from the Shopify Dev ` +
+          `Dashboard to Vercel env.`,
+      );
+    }
+    return { code: upper, domain, clientId, clientSecret: rawToken };
+  }
+
+  throw new Error(
+    `Store "${upper}" token has unexpected prefix "${rawToken.slice(0, 7)}". ` +
+      `Expected shpat_ (static token) or shpss_ (OAuth client secret).`,
+  );
 }
 
 /** True if this store has Shopify API credentials configured. Used by the
@@ -41,20 +81,27 @@ export function listConfiguredStores(): string[] {
   return Array.from(codes).sort();
 }
 
-/** Diagnostic only — returns each configured store's token prefix (e.g. "shpat_")
- *  so we can tell at a glance whether Vercel is holding the Admin-API token we
- *  expect vs. a leftover session token. Does not leak the secret. */
 export function describeConfiguredTokens(): Array<{
   code: string;
   tokenPrefix: string;
   tokenLength: number;
+  authMode: "static" | "oauth" | "unknown";
+  hasClientId: boolean;
 }> {
   return listConfiguredStores().map((code) => {
     const tok = process.env[`${code}_TOKEN`] ?? "";
+    const prefix = tok.slice(0, 7);
+    const mode: "static" | "oauth" | "unknown" = tok.startsWith("shpat_")
+      ? "static"
+      : tok.startsWith("shpss_")
+        ? "oauth"
+        : "unknown";
     return {
       code,
-      tokenPrefix: tok.slice(0, 7),
+      tokenPrefix: prefix,
       tokenLength: tok.length,
+      authMode: mode,
+      hasClientId: Boolean(process.env[`${code}_CLIENT_ID`]),
     };
   });
 }
