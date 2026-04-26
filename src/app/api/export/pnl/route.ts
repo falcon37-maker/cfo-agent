@@ -42,6 +42,8 @@ export async function GET(request: NextRequest) {
     "Date",
     "Store",
     "Revenue",
+    "Subs Revenue",
+    "Total Revenue",
     "Ad Spend",
     "COGS",
     "Fees",
@@ -55,12 +57,15 @@ export async function GET(request: NextRequest) {
   const lines = [header.join(",")];
 
   for (const r of ledger.rows) {
-    const roas = r.ad_spend > 0 ? (r.revenue / r.ad_spend).toFixed(4) : "";
+    const roas =
+      r.ad_spend > 0 ? (r.total_revenue / r.ad_spend).toFixed(4) : "";
     lines.push(
       [
         r.date,
         storeLabel,
         r.revenue.toFixed(2),
+        r.subs_revenue.toFixed(2),
+        r.total_revenue.toFixed(2),
         r.ad_spend.toFixed(2),
         r.cogs.toFixed(2),
         r.fees.toFixed(2),
@@ -81,6 +86,8 @@ export async function GET(request: NextRequest) {
       "TOTAL",
       storeLabel,
       t.revenue.toFixed(2),
+      t.subs_revenue.toFixed(2),
+      t.total_revenue.toFixed(2),
       t.ad_spend.toFixed(2),
       t.cogs.toFixed(2),
       t.fees.toFixed(2),

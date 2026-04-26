@@ -24,7 +24,9 @@ export type StoreInfo = {
 
 export type DailyRow = {
   date: string; // YYYY-MM-DD
-  revenue: number;
+  revenue: number; // Shopify front-end
+  subs_revenue: number; // PHX Initial + Recurring + Salvage (blended in for PHX stores)
+  total_revenue: number; // revenue + subs_revenue
   cogs: number;
   fees: number;
   refunds: number;
@@ -37,6 +39,8 @@ export type DailyRow = {
 
 export type Totals = {
   revenue: number;
+  subs_revenue: number;
+  total_revenue: number;
   cogs: number;
   fees: number;
   refunds: number;
@@ -587,7 +591,12 @@ export type PnlLedger = {
 /** Filtered/aggregated ledger for /pnl.
  *  Pass either `days` (rolling window ending today) or an explicit `{from, to}`.
  *  storeFilter may be a single id, "all", or an array of ids; an empty array
- *  is equivalent to "all". */
+ *  is equivalent to "all".
+ *
+ *  For stores in PHX_STORE_IDS we also pull per-day Initial + Recurring +
+ *  Salvage revenue from phx_summary_snapshots and blend it into each row's
+ *  subs_revenue / total_revenue, so the Stores page shows the real picture
+ *  for NOVA/NURA/KOVA — not just their Shopify front-end slice. */
 export async function loadPnlLedger(
   rangeSpec: { days: number } | { from: string; to: string },
   storeFilter: string | string[],
@@ -604,9 +613,64 @@ export async function loadPnlLedger(
       ? rows
       : rows.filter((r) => selected.includes(r.store_id));
 
+  // Fetch PHX subs revenue for any PHX stores in the selection (or all PHX
+  // stores when no filter is applied).
+  const phxStoreIds = stores
+    .map((s) => s.id)
+    .filter((id) => PHX_STORE_IDS.has(id));
+  const phxStoresInFilter =
+    selected.length === 0
+      ? phxStoreIds
+      : selected.filter((id) => PHX_STORE_IDS.has(id));
+
+  // Resolve the date window we actually need.
+  const winFrom =
+    "from" in rangeSpec
+      ? rangeSpec.from
+      : addDays(todayUtc(), -(rangeSpec.days - 1));
+  const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
+  const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter);
+
+  const phxSubsByDate = new Map<string, number>();
+  for (const r of phxRows) {
+    if (!r.range_from || r.range_from !== r.range_to) continue;
+    const subs =
+      Number(r.revenue_initial ?? 0) +
+      Number(r.revenue_recurring ?? 0) +
+      Number(r.revenue_salvage ?? 0);
+    phxSubsByDate.set(
+      r.range_from,
+      (phxSubsByDate.get(r.range_from) ?? 0) + subs,
+    );
+  }
+
+  const feeRate =
+    Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) ||
+    0.1;
+
   const byDate = groupByDate(filtered);
   const ordered = Object.keys(byDate).sort().reverse();
-  const ledger: DailyRow[] = ordered.map((d) => aggregate(byDate[d]));
+  const ledger: DailyRow[] = ordered.map((d) => {
+    const base = aggregate(byDate[d]);
+    const subs = phxSubsByDate.get(d) ?? 0;
+    if (subs === 0) return base;
+    // Subs add to revenue. Net profit picks up subs * (1 − fee_rate); the
+    // store's Shopify-side ad_spend / cogs / fees / refunds were already
+    // baked into base.net_profit by the aggregator.
+    const subsContribution = subs * (1 - feeRate);
+    return {
+      ...base,
+      subs_revenue: subs,
+      total_revenue: base.revenue + subs,
+      net_profit: base.net_profit + subsContribution,
+      gross_profit: base.gross_profit + subs,
+      margin_pct:
+        base.revenue + subs > 0
+          ? ((base.net_profit + subsContribution) / (base.revenue + subs)) *
+            100
+          : 0,
+    };
+  });
 
   const totals = sumTotals(ledger);
 
@@ -674,6 +738,8 @@ function aggregate(rows: RawPnlRow[]): DailyRow {
   return {
     date,
     revenue,
+    subs_revenue: 0,
+    total_revenue: revenue,
     cogs,
     fees,
     refunds,
@@ -688,6 +754,8 @@ function aggregate(rows: RawPnlRow[]): DailyRow {
 function toTotals(r: DailyRow): Totals {
   return {
     revenue: r.revenue,
+    subs_revenue: r.subs_revenue,
+    total_revenue: r.total_revenue,
     cogs: r.cogs,
     fees: r.fees,
     refunds: r.refunds,
@@ -695,13 +763,15 @@ function toTotals(r: DailyRow): Totals {
     gross_profit: r.gross_profit,
     net_profit: r.net_profit,
     orders: r.order_count,
-    roas: r.ad_spend > 0 ? r.revenue / r.ad_spend : 0,
+    roas: r.ad_spend > 0 ? r.total_revenue / r.ad_spend : 0,
     margin_pct: r.margin_pct,
   };
 }
 
 function sumTotals(rows: DailyRow[]): Totals {
   let revenue = 0,
+    subs_revenue = 0,
+    total_revenue = 0,
     cogs = 0,
     fees = 0,
     refunds = 0,
@@ -711,6 +781,8 @@ function sumTotals(rows: DailyRow[]): Totals {
     orders = 0;
   for (const r of rows) {
     revenue += r.revenue;
+    subs_revenue += r.subs_revenue;
+    total_revenue += r.total_revenue;
     cogs += r.cogs;
     fees += r.fees;
     refunds += r.refunds;
@@ -721,6 +793,8 @@ function sumTotals(rows: DailyRow[]): Totals {
   }
   return {
     revenue,
+    subs_revenue,
+    total_revenue,
     cogs,
     fees,
     refunds,
@@ -728,8 +802,8 @@ function sumTotals(rows: DailyRow[]): Totals {
     gross_profit,
     net_profit,
     orders,
-    roas: ad_spend > 0 ? revenue / ad_spend : 0,
-    margin_pct: revenue > 0 ? (net_profit / revenue) * 100 : 0,
+    roas: ad_spend > 0 ? total_revenue / ad_spend : 0,
+    margin_pct: total_revenue > 0 ? (net_profit / total_revenue) * 100 : 0,
   };
 }
 
@@ -737,6 +811,8 @@ function emptyDailyRow(date: string): DailyRow {
   return {
     date,
     revenue: 0,
+    subs_revenue: 0,
+    total_revenue: 0,
     cogs: 0,
     fees: 0,
     refunds: 0,

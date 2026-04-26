@@ -110,9 +110,9 @@ export default async function PnlPage({
         <div>
           <h2 className="section-title">Stores</h2>
           <div className="section-sub">
-            Per-store front-end P&amp;L — direct and initial-subscription
-            orders. Blended revenue (with PHX recurring) lives on the
-            dashboard.{" "}
+            Per-store P&amp;L. NOVA / NURA / KOVA include their PHX
+            subscription revenue (Initial + Recurring + Salvage) in the
+            <span className="mono"> Subs Rev</span> column.{" "}
             {selected.length === 0
               ? "All stores"
               : selected.length === 1
@@ -183,13 +183,17 @@ export default async function PnlPage({
       </div>
 
       <div className="pnl-totals">
-        <TotalTile label="Total Revenue" value={moneyShort(totals.revenue)} />
-        <TotalTile label="Total Ad Spend" value={moneyShort(totals.ad_spend)} />
         <TotalTile
-          label="Gross Profit"
-          value={moneyShort(totals.gross_profit)}
-          tone={totals.gross_profit >= 0 ? "pos" : "neg"}
+          label="Total Revenue"
+          value={moneyShort(totals.total_revenue)}
         />
+        <TotalTile
+          label="Subs Revenue"
+          value={
+            totals.subs_revenue > 0 ? moneyShort(totals.subs_revenue) : "—"
+          }
+        />
+        <TotalTile label="Total Ad Spend" value={moneyShort(totals.ad_spend)} />
         <TotalTile
           label="Net Profit"
           value={moneyShort(totals.net_profit)}
@@ -223,6 +227,7 @@ export default async function PnlPage({
                 <th>Date</th>
                 <th className="num">Orders</th>
                 <th className="num">Revenue</th>
+                <th className="num">Subs Rev</th>
                 <th className="num">Ad Spend</th>
                 <th className="num">COGS</th>
                 <th className="num">Fees</th>
@@ -234,12 +239,23 @@ export default async function PnlPage({
             </thead>
             <tbody>
               {rows.map((r) => {
-                const roas = r.ad_spend > 0 ? r.revenue / r.ad_spend : 0;
+                const roas = r.ad_spend > 0 ? r.total_revenue / r.ad_spend : 0;
                 return (
                   <tr key={r.date}>
                     <td>{fmtDate(r.date)}</td>
                     <td className="num muted">{fmtInt(r.order_count)}</td>
                     <td className="num">{fmtMoney(r.revenue)}</td>
+                    <td
+                      className="num"
+                      style={{
+                        color:
+                          r.subs_revenue > 0
+                            ? "var(--accent-dim)"
+                            : "var(--muted-strong)",
+                      }}
+                    >
+                      {r.subs_revenue > 0 ? fmtMoney(r.subs_revenue) : "—"}
+                    </td>
                     <td className="num muted">{fmtMoney(r.ad_spend)}</td>
                     <td className="num muted">{fmtMoney(r.cogs)}</td>
                     <td className="num muted">{fmtMoney(r.fees)}</td>
@@ -265,6 +281,11 @@ export default async function PnlPage({
                   <td>Total</td>
                   <td className="num">{fmtInt(totals.orders)}</td>
                   <td className="num">{fmtMoney(totals.revenue)}</td>
+                  <td className="num">
+                    {totals.subs_revenue > 0
+                      ? fmtMoney(totals.subs_revenue)
+                      : "—"}
+                  </td>
                   <td className="num">{fmtMoney(totals.ad_spend)}</td>
                   <td className="num">{fmtMoney(totals.cogs)}</td>
                   <td className="num">{fmtMoney(totals.fees)}</td>
