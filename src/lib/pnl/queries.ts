@@ -631,17 +631,25 @@ export async function loadPnlLedger(
   const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
   const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter);
 
-  const phxSubsByDate = new Map<string, number>();
+  // Subs Rev = Recurring + Salvage only. PHX "Initial" and "Direct" both
+  // flow through the Shopify checkout, so daily_pnl.revenue already counts
+  // them — adding revenue_initial here would double-count first-month
+  // subscription sign-ups.
+  const phxSubsByDate = new Map<
+    string,
+    { revenue: number; orders: number }
+  >();
   for (const r of phxRows) {
     if (!r.range_from || r.range_from !== r.range_to) continue;
     const subs =
-      Number(r.revenue_initial ?? 0) +
-      Number(r.revenue_recurring ?? 0) +
-      Number(r.revenue_salvage ?? 0);
-    phxSubsByDate.set(
-      r.range_from,
-      (phxSubsByDate.get(r.range_from) ?? 0) + subs,
-    );
+      Number(r.revenue_recurring ?? 0) + Number(r.revenue_salvage ?? 0);
+    const j = (r.raw_json as Record<string, unknown> | null) ?? {};
+    const subOrders =
+      Number(j.recurringCount ?? 0) + Number(j.salvageCount ?? 0);
+    const cur = phxSubsByDate.get(r.range_from) ?? { revenue: 0, orders: 0 };
+    cur.revenue += subs;
+    cur.orders += subOrders;
+    phxSubsByDate.set(r.range_from, cur);
   }
 
   const feeRate =
@@ -652,23 +660,24 @@ export async function loadPnlLedger(
   const ordered = Object.keys(byDate).sort().reverse();
   const ledger: DailyRow[] = ordered.map((d) => {
     const base = aggregate(byDate[d]);
-    const subs = phxSubsByDate.get(d) ?? 0;
-    if (subs === 0) return base;
+    const subs = phxSubsByDate.get(d);
+    if (!subs || subs.revenue === 0) return base;
     // Subs add to revenue. Net profit picks up subs * (1 − fee_rate); the
     // store's Shopify-side ad_spend / cogs / fees / refunds were already
     // baked into base.net_profit by the aggregator.
-    const subsContribution = subs * (1 - feeRate);
+    const subsContribution = subs.revenue * (1 - feeRate);
+    const totalRev = base.revenue + subs.revenue;
     return {
       ...base,
-      subs_revenue: subs,
-      total_revenue: base.revenue + subs,
+      subs_revenue: subs.revenue,
+      total_revenue: totalRev,
+      // PHX rebills + salvage hit Solvpath but never the Shopify storefront,
+      // so they're additive to Shopify's order_count.
+      order_count: base.order_count + subs.orders,
       net_profit: base.net_profit + subsContribution,
-      gross_profit: base.gross_profit + subs,
+      gross_profit: base.gross_profit + subs.revenue,
       margin_pct:
-        base.revenue + subs > 0
-          ? ((base.net_profit + subsContribution) / (base.revenue + subs)) *
-            100
-          : 0,
+        totalRev > 0 ? ((base.net_profit + subsContribution) / totalRev) * 100 : 0,
     };
   });
 
