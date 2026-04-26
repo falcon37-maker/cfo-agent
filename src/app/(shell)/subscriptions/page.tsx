@@ -1,3 +1,7 @@
+// /subscriptions — Overview tab.
+// Daily ledger (Initial + Recurring + Salvage from PHX) + lifetime KPI strip
+// + transaction-type Order Mix.
+
 import Link from "next/link";
 import {
   Users,
@@ -8,282 +12,441 @@ import {
 } from "lucide-react";
 import {
   loadLatestPortfolioSnapshot,
-  loadPortfolioSnapshots,
+  loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
+import { loadStores } from "@/lib/pnl/queries";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
+import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Subscriptions — CFO Agent" };
 
+const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const RANGES: Array<{ id: string; days: number }> = [
+  { id: "7d", days: 7 },
+  { id: "30d", days: 30 },
+  { id: "90d", days: 90 },
+];
 
-function relTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function addDays(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+function qs(p: Record<string, string>): string {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(p)) if (v) sp.set(k, v);
+  const s = sp.toString();
+  return s ? `?${s}` : "";
+}
+function parseStoreList(raw: string): string[] {
+  if (!raw || raw.toLowerCase() === "all") return [];
+  return raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+}
+function num(v: number | string | null | undefined): number {
+  if (v == null) return 0;
+  const n = typeof v === "string" ? Number(v) : v;
+  return Number.isFinite(n) ? n : 0;
 }
 
-function pct(curr: number | null, prev: number | null): number | null {
-  if (curr == null || prev == null || prev === 0) return null;
-  return ((curr - prev) / Math.abs(prev)) * 100;
+type DailyPnlRow = {
+  store_id: string;
+  date: string;
+  ad_spend: number | string | null;
+  cogs: number | string | null;
+  fees: number | string | null;
+};
+
+async function loadDailyPnl(
+  from: string,
+  to: string,
+  storeIds: string[],
+): Promise<DailyPnlRow[]> {
+  const sb = supabaseAdmin();
+  let q = sb
+    .from("daily_pnl")
+    .select("store_id, date, ad_spend, cogs, fees")
+    .gte("date", from)
+    .lte("date", to);
+  if (storeIds.length > 0) q = q.in("store_id", storeIds);
+  const { data } = await q;
+  return (data ?? []) as DailyPnlRow[];
 }
 
-function periodLabel(s: PhxSnapshot): string {
-  const from = new Date(`${s.range_from}T00:00:00Z`);
-  const to = new Date(`${s.range_to}T00:00:00Z`);
-  // If it's a full calendar month → "April 2026"; otherwise "Apr 1 → Apr 20"
-  const sameMonth =
-    from.getUTCFullYear() === to.getUTCFullYear() &&
-    from.getUTCMonth() === to.getUTCMonth();
-  const firstDay = from.getUTCDate() === 1;
-  const lastDay =
-    new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 0)).getUTCDate() ===
-    to.getUTCDate();
-  if (sameMonth && firstDay && lastDay) {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    }).format(from);
+type LedgerRow = {
+  date: string;
+  orders: number;
+  revenue: number;
+  ad_spend: number;
+  cogs: number;
+  fees: number;
+  gross_profit: number;
+  net_profit: number;
+  roas: number;
+};
+
+function buildLedger(
+  phxRows: PhxSnapshot[],
+  pnlRows: DailyPnlRow[],
+): LedgerRow[] {
+  type Acc = {
+    orders: number;
+    revenue: number;
+    ad_spend: number;
+    cogs: number;
+    fees: number;
+  };
+  const byDate = new Map<string, Acc>();
+  const get = (d: string) => {
+    let m = byDate.get(d);
+    if (!m) {
+      m = { orders: 0, revenue: 0, ad_spend: 0, cogs: 0, fees: 0 };
+      byDate.set(d, m);
+    }
+    return m;
+  };
+  for (const r of phxRows) {
+    if (!r.range_from || r.range_from !== r.range_to) continue;
+    const d = r.range_from;
+    const m = get(d);
+    m.revenue +=
+      num(r.revenue_initial) +
+      num(r.revenue_recurring) +
+      num(r.revenue_salvage);
+    const j = (r.raw_json as Record<string, unknown> | null) ?? {};
+    m.orders +=
+      Number(j.initialCount ?? 0) +
+      Number(j.recurringCount ?? 0) +
+      Number(j.salvageCount ?? 0);
   }
-  return `${fmtDate(s.range_from!)} → ${fmtDate(s.range_to!)}`;
+  for (const r of pnlRows) {
+    const m = get(r.date);
+    m.ad_spend += num(r.ad_spend);
+    m.cogs += num(r.cogs);
+    m.fees += num(r.fees);
+  }
+  const out: LedgerRow[] = [];
+  for (const [date, m] of [...byDate.entries()].sort((a, b) =>
+    b[0].localeCompare(a[0]),
+  )) {
+    const gross_profit = m.revenue - m.cogs - m.fees;
+    const net_profit = gross_profit - m.ad_spend;
+    const roas = m.ad_spend > 0 ? m.revenue / m.ad_spend : 0;
+    out.push({ date, ...m, gross_profit, net_profit, roas });
+  }
+  return out;
 }
 
-export default async function SubscriptionsPage({
+function sumLedger(rows: LedgerRow[]) {
+  let orders = 0,
+    revenue = 0,
+    ad_spend = 0,
+    cogs = 0,
+    fees = 0,
+    gross_profit = 0,
+    net_profit = 0;
+  for (const r of rows) {
+    orders += r.orders;
+    revenue += r.revenue;
+    ad_spend += r.ad_spend;
+    cogs += r.cogs;
+    fees += r.fees;
+    gross_profit += r.gross_profit;
+    net_profit += r.net_profit;
+  }
+  const roas = ad_spend > 0 ? revenue / ad_spend : 0;
+  return { orders, revenue, ad_spend, cogs, fees, gross_profit, net_profit, roas };
+}
+
+export default async function SubscriptionsOverviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    from?: string;
+    to?: string;
+    store?: string;
+  }>;
 }) {
   const params = await searchParams;
   const customFrom = DATE_RE.test(params.from ?? "") ? params.from! : undefined;
   const customTo = DATE_RE.test(params.to ?? "") ? params.to! : undefined;
   const hasCustom = Boolean(customFrom && customTo);
+  const range = RANGES.find((r) => r.id === params.range) ?? RANGES[1];
+  const selected = parseStoreList(params.store ?? "");
+  const activeParam = selected.slice().sort().join(",");
 
-  const [snapshot, history] = await Promise.all([
-    loadLatestPortfolioSnapshot(
-      hasCustom ? { from: customFrom!, to: customTo! } : undefined,
-    ),
-    loadPortfolioSnapshots(12),
+  const to = hasCustom ? customTo! : todayUtc();
+  const from = hasCustom ? customFrom! : addDays(to, -(range.days - 1));
+  const rangeLabel = hasCustom
+    ? `${fmtDate(from)} → ${fmtDate(to)}`
+    : `Last ${range.days} days`;
+
+  const stores = await loadStores();
+  const phxStores = stores.map((s) => s.id).filter((id) => PHX_STORE_IDS.has(id));
+  const selectedPhx =
+    selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
+
+  const [snapshot, phxDays, pnlRows] = await Promise.all([
+    loadLatestPortfolioSnapshot(),
+    loadPhxDailyRows(from, to, selectedPhx),
+    loadDailyPnl(from, to, selectedPhx),
   ]);
 
-  // Oldest-first series for sparklines.
-  const chrono = [...history].reverse();
-  const chronoIdx = snapshot
-    ? chrono.findIndex(
-        (s) =>
-          s.range_from === snapshot.range_from &&
-          s.range_to === snapshot.range_to,
-      )
-    : -1;
-  const prior = chronoIdx > 0 ? chrono[chronoIdx - 1] : null;
+  const ledger = buildLedger(phxDays, pnlRows);
+  const totals = sumLedger(ledger);
 
-  const trend = (k: keyof PhxSnapshot): number[] =>
-    chrono.map((s) => Number(s[k] ?? 0));
+  // chips
+  const chipHrefAll = `/subscriptions${qs({
+    range: hasCustom ? "" : range.id,
+    from: hasCustom ? customFrom! : "",
+    to: hasCustom ? customTo! : "",
+  })}`;
+  const buildToggleHref = (storeId: string): string => {
+    const next = new Set(selected);
+    if (next.has(storeId)) next.delete(storeId);
+    else next.add(storeId);
+    const param = Array.from(next).sort().join(",");
+    return `/subscriptions${qs({
+      range: hasCustom ? "" : range.id,
+      from: hasCustom ? customFrom! : "",
+      to: hasCustom ? customTo! : "",
+      store: param,
+    })}`;
+  };
 
   return (
     <>
       <div className="pnl-header">
         <div>
-          <h2 className="section-title">
-            Subscriptions
-            <span className="phx-tag">PHX</span>
-          </h2>
+          <h2 className="section-title">Subscriptions</h2>
           <div className="section-sub">
-            Portfolio · all Falcon 37 stores aggregated ·{" "}
-            {snapshot
-              ? `${periodLabel(snapshot)} · scraped ${relTime(snapshot.scraped_at)}`
-              : hasCustom
-                ? "no snapshot matches this range"
-                : "no snapshots yet — sync via the Chrome extension"}
+            PHX subscription operations · Initial + Recurring + Salvage. ·{" "}
+            {rangeLabel}
+            {selected.length > 0 ? ` · ${selected.join(", ")}` : ""}
           </div>
         </div>
         <div className="pnl-controls">
+          <div className="seg" role="tablist" aria-label="Range">
+            {RANGES.map((r) => (
+              <SegLink
+                key={r.id}
+                active={!hasCustom && r.id === range.id}
+                href={`/subscriptions${qs({
+                  range: r.id,
+                  store: activeParam,
+                })}`}
+              >
+                {r.id}
+              </SegLink>
+            ))}
+            <SegLink
+              active={hasCustom}
+              href={`/subscriptions${qs({
+                store: activeParam,
+                from: customFrom ?? from,
+                to: customTo ?? to,
+              })}`}
+            >
+              Custom
+            </SegLink>
+          </div>
           <DateRangeForm
             action="/subscriptions"
-            from={customFrom}
-            to={customTo}
+            from={customFrom ?? from}
+            to={customTo ?? to}
+            hidden={{ store: activeParam }}
           />
+          <div
+            role="group"
+            aria-label="Stores"
+            style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+          >
+            <Link
+              href={chipHrefAll}
+              className={`store-chip ${selected.length === 0 ? "active" : ""}`}
+              prefetch={false}
+            >
+              All
+            </Link>
+            {phxStores.map((id) => (
+              <Link
+                key={id}
+                href={buildToggleHref(id)}
+                className={`store-chip ${selected.includes(id) ? "active" : ""}`}
+                prefetch={false}
+              >
+                {id}
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
 
-      {snapshot == null ? (
-        <EmptyState hasCustom={hasCustom} />
-      ) : (
-        <>
-          <section className="kpi-row kpi-5">
-            <KpiCard
-              label="Active Subscribers"
-              value={fmtInt(snapshot.active_subscribers)}
-              delta={null}
-              deltaLabel="lifetime · as of scrape"
-              spark={trend("active_subscribers")}
-              icon={<Users size={14} strokeWidth={1.75} />}
-            />
-            <KpiCard
-              label="Subs to bill"
-              value={fmtInt(snapshot.subscriptions_to_bill)}
-              delta={pct(
-                snapshot.subscriptions_to_bill,
-                prior?.subscriptions_to_bill ?? null,
-              )}
-              deltaLabel={prior ? `vs ${periodLabel(prior)}` : "no prior period"}
-              spark={trend("subscriptions_to_bill")}
-              icon={<CreditCard size={14} strokeWidth={1.75} />}
-            />
-            <KpiCard
-              label="Target CAC"
-              value={
-                snapshot.target_cac != null
-                  ? fmtMoney(snapshot.target_cac)
-                  : "—"
-              }
-              delta={pct(snapshot.target_cac, prior?.target_cac ?? null)}
-              deltaLabel={prior ? `vs ${periodLabel(prior)}` : "no prior period"}
-              spark={trend("target_cac")}
-              sparkColor="var(--muted-strong)"
-              invert
-              icon={<Target size={14} strokeWidth={1.75} />}
-            />
-            <KpiCard
-              label="Transactions"
-              value={fmtInt(snapshot.total_transactions_mtd)}
-              delta={pct(
-                snapshot.total_transactions_mtd,
-                prior?.total_transactions_mtd ?? null,
-              )}
-              deltaLabel={prior ? `vs ${periodLabel(prior)}` : "no prior period"}
-              spark={trend("total_transactions_mtd")}
-              icon={<Activity size={14} strokeWidth={1.75} />}
-            />
-            <KpiCard
-              label="Refund total"
-              value={fmtMoney(snapshot.refund_total)}
-              delta={pct(snapshot.refund_total, prior?.refund_total ?? null)}
-              deltaLabel={prior ? `vs ${periodLabel(prior)}` : "no prior period"}
-              spark={trend("refund_total")}
-              sparkColor="var(--negative)"
-              invert
-              icon={<AlertCircle size={14} strokeWidth={1.75} />}
-            />
-          </section>
+      {/* ── Lifetime KPI strip (from latest snapshot) ── */}
+      {snapshot ? <KpiStrip snapshot={snapshot} /> : <NoSnapshotBanner />}
 
-          <LifetimeNote snapshot={snapshot} />
-
-          <OrderMix snapshot={snapshot} />
-          <RefundSummary snapshot={snapshot} />
-          {history.length > 1 ? (
-            <PeriodHistory snapshots={history} current={snapshot} />
+      {/* ── Daily ledger ── */}
+      <div className="card table-card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">Daily ledger · subscriptions</div>
+            <div className="card-sub">
+              Per-day Initial + Recurring + Salvage revenue, plus the
+              Shopify-side ad spend / COGS / fees for the same stores.
+            </div>
+          </div>
+        </div>
+        <div className="table-wrap" style={{ maxHeight: 560 }}>
+          <table className="pnl-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th className="num">Orders</th>
+                <th className="num">Revenue</th>
+                <th className="num">Ad Spend</th>
+                <th className="num">COGS</th>
+                <th className="num">Fees</th>
+                <th className="num">Gross Profit</th>
+                <th className="num">Net Profit</th>
+                <th className="num">ROAS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.map((r) => (
+                <tr key={r.date}>
+                  <td>{fmtDate(r.date)}</td>
+                  <td className="num muted">{fmtInt(r.orders)}</td>
+                  <td className="num">{fmtMoney(r.revenue)}</td>
+                  <td className="num muted">{fmtMoney(r.ad_spend)}</td>
+                  <td className="num muted">{fmtMoney(r.cogs)}</td>
+                  <td className="num muted">{fmtMoney(r.fees)}</td>
+                  <td className="num">{fmtMoney(r.gross_profit)}</td>
+                  <td
+                    className={`num profit ${r.net_profit >= 0 ? "pos" : "neg"}`}
+                  >
+                    <span className="profit-pill">{fmtMoney(r.net_profit)}</span>
+                  </td>
+                  <td
+                    className={`num roas ${r.ad_spend > 0 ? (r.roas >= 2 ? "pos" : "neg") : ""}`}
+                  >
+                    {r.ad_spend > 0 ? `${r.roas.toFixed(2)}x` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {ledger.length > 0 ? (
+              <tfoot>
+                <tr className="tfoot-row">
+                  <td>Total</td>
+                  <td className="num">{fmtInt(totals.orders)}</td>
+                  <td className="num">{fmtMoney(totals.revenue)}</td>
+                  <td className="num">{fmtMoney(totals.ad_spend)}</td>
+                  <td className="num">{fmtMoney(totals.cogs)}</td>
+                  <td className="num">{fmtMoney(totals.fees)}</td>
+                  <td className="num">{fmtMoney(totals.gross_profit)}</td>
+                  <td className={`num profit ${totals.net_profit >= 0 ? "pos" : "neg"}`}>
+                    <span className="profit-pill">{fmtMoney(totals.net_profit)}</span>
+                  </td>
+                  <td
+                    className={`num roas ${totals.ad_spend > 0 ? (totals.roas >= 2 ? "pos" : "neg") : ""}`}
+                  >
+                    {totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
+                  </td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+          {ledger.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
+              No subscription data in this range. Check that Solvpath has
+              synced — the latest scrape was{" "}
+              {snapshot?.scraped_at?.slice(0, 10) ?? "(never)"}.
+            </div>
           ) : null}
-          <WaveBStub />
-        </>
-      )}
+        </div>
+      </div>
+
+      {/* ── Order mix ── */}
+      {snapshot ? <OrderMix snapshot={snapshot} /> : null}
     </>
   );
 }
 
-/** Small callout below the KPI row explaining the lifetime vs period split. */
-function LifetimeNote({ snapshot }: { snapshot: PhxSnapshot }) {
+function KpiStrip({ snapshot }: { snapshot: PhxSnapshot }) {
   return (
-    <div
-      className="card"
-      style={{
-        padding: "12px 18px",
-        display: "flex",
-        gap: 24,
-        flexWrap: "wrap",
-        alignItems: "center",
-        fontSize: 12,
-        color: "var(--muted)",
-      }}
-    >
-      <span
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          fontSize: 10.5,
-          fontWeight: 500,
-        }}
-      >
-        Lifetime · as of scrape
-      </span>
-      <span>
-        Active <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{fmtInt(snapshot.active_subscribers)}</strong>
-      </span>
-      <span>
-        In salvage{" "}
-        <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{fmtInt(snapshot.subscribers_in_salvage)}</strong>
-      </span>
-      <span>
-        Cancelled{" "}
-        <strong style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>{fmtInt(snapshot.cancelled_subscribers)}</strong>
-      </span>
-      <span style={{ marginLeft: "auto", fontStyle: "italic" }}>
-        These are store-state counters; they don&apos;t change with the PHX date range.
-      </span>
-    </div>
+    <section className="kpi-row kpi-5">
+      <KpiCard
+        label="Active Subscribers"
+        value={fmtInt(snapshot.active_subscribers)}
+        delta={null}
+        deltaLabel="lifetime · as of latest scrape"
+        spark={[]}
+        icon={<Users size={14} strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Subs to bill"
+        value={fmtInt(snapshot.subscriptions_to_bill)}
+        delta={null}
+        deltaLabel="next billing window"
+        spark={[]}
+        icon={<CreditCard size={14} strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Target CAC"
+        value={
+          snapshot.target_cac != null ? fmtMoney(snapshot.target_cac) : "—"
+        }
+        delta={null}
+        deltaLabel="from latest snapshot"
+        spark={[]}
+        sparkColor="var(--muted-strong)"
+        invert
+        icon={<Target size={14} strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Transactions"
+        value={fmtInt(snapshot.total_transactions_mtd)}
+        delta={null}
+        deltaLabel="MTD · latest snapshot"
+        spark={[]}
+        icon={<Activity size={14} strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Refund total"
+        value={fmtMoney(snapshot.refund_total)}
+        delta={null}
+        deltaLabel="MTD · latest snapshot"
+        spark={[]}
+        sparkColor="var(--negative)"
+        invert
+        icon={<AlertCircle size={14} strokeWidth={1.75} />}
+      />
+    </section>
   );
 }
 
-function EmptyState({ hasCustom }: { hasCustom: boolean }) {
+function NoSnapshotBanner() {
   return (
     <div
       className="card"
       style={{
-        padding: "32px",
+        padding: "20px",
         textAlign: "center",
-        color: "var(--text-dim)",
+        color: "var(--muted)",
+        fontSize: 12,
       }}
     >
-      <div style={{ fontSize: 20, fontWeight: 600, color: "var(--text)" }}>
-        {hasCustom ? "No snapshot in this range" : "No Phoenix data yet"}
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          lineHeight: 1.5,
-          marginTop: 8,
-          maxWidth: 520,
-          marginInline: "auto",
-        }}
-      >
-        {hasCustom ? (
-          <>
-            Try a wider date range, or{" "}
-            <Link href="/subscriptions" style={{ color: "var(--accent)" }}>
-              clear the filter
-            </Link>{" "}
-            to see the most recent snapshot.
-          </>
-        ) : (
-          <>
-            Install the{" "}
-            <Link
-              href="https://github.com/falcon37-maker/cfo-agent-extension"
-              style={{ color: "var(--accent)" }}
-              target="_blank"
-            >
-              CFO Agent PHX Sync
-            </Link>{" "}
-            extension, open{" "}
-            <code
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                background: "var(--surface-3)",
-                padding: "2px 6px",
-                borderRadius: 4,
-              }}
-            >
-              app1.phoenixcrm.io/app/dashboard
-            </code>
-            , set a Date Range, and hit Sync Now.
-          </>
-        )}
-      </div>
+      No PHX snapshot has landed yet. Check the Solvpath sync.
     </div>
   );
 }
@@ -319,12 +482,12 @@ function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
   const total = rows.reduce((s, r) => s + (r.count ?? 0), 0);
 
   return (
-    <div className="card table-card">
+    <div className="card table-card" style={{ marginTop: 16 }}>
       <div className="card-head">
         <div>
           <div className="card-title">Order mix</div>
           <div className="card-sub">
-            Counts and approval rates for {periodLabel(snapshot)}
+            Counts and approval rates from latest PHX snapshot
           </div>
         </div>
       </div>
@@ -364,194 +527,6 @@ function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
             </tr>
           </tfoot>
         </table>
-      </div>
-    </div>
-  );
-}
-
-function RefundSummary({ snapshot }: { snapshot: PhxSnapshot }) {
-  const byChannel: Array<[string, number | null]> = [
-    ["Agent", snapshot.refund_agent],
-    ["Ethoca", snapshot.refund_ethoca],
-    ["CDRN", snapshot.refund_cdrn],
-    ["RDR withdrawals", snapshot.refund_rdr_withdrawals],
-    ["Chargeback withdrawals", snapshot.refund_chargeback_withdrawals],
-  ];
-
-  return (
-    <div className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Refunds &amp; chargebacks</div>
-          <div className="card-sub">Month-to-date + channel breakdown</div>
-        </div>
-      </div>
-      <div style={{ padding: "16px 18px", display: "grid", gap: 18 }}>
-        <div
-          className="pnl-totals"
-          style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
-        >
-          <div className="total-tile">
-            <div className="total-label">Refunds MTD</div>
-            <div className="total-value">
-              {fmtInt(snapshot.refunds_mtd_count)}
-            </div>
-            <div className="card-sub">
-              {snapshot.refunds_mtd_pct != null
-                ? `${fmtPct(snapshot.refunds_mtd_pct)} of ${fmtInt(snapshot.total_transactions_mtd)} txns`
-                : "—"}
-            </div>
-          </div>
-          <div className="total-tile">
-            <div className="total-label">Chargebacks MTD</div>
-            <div className="total-value">
-              {fmtInt(snapshot.chargebacks_mtd_count)}
-            </div>
-            <div className="card-sub">
-              {snapshot.chargebacks_mtd_pct != null
-                ? fmtPct(snapshot.chargebacks_mtd_pct)
-                : "—"}
-            </div>
-          </div>
-          <div className="total-tile tone-neg">
-            <div className="total-label">Refund $ total</div>
-            <div className="total-value">{fmtMoney(snapshot.refund_total)}</div>
-          </div>
-        </div>
-
-        <div className="table-wrap">
-          <table className="pnl-table">
-            <thead>
-              <tr>
-                <th>Channel</th>
-                <th className="num">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byChannel.map(([label, val]) => (
-                <tr key={label}>
-                  <td>{label}</td>
-                  <td className="num muted">
-                    {val != null ? fmtMoney(val) : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PeriodHistory({
-  snapshots,
-  current,
-}: {
-  snapshots: PhxSnapshot[];
-  current: PhxSnapshot;
-}) {
-  return (
-    <div className="card table-card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Snapshot history</div>
-          <div className="card-sub">
-            One row per PHX reporting period · {snapshots.length} captured
-          </div>
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table className="pnl-table">
-          <thead>
-            <tr>
-              <th>Period</th>
-              <th className="num">Transactions</th>
-              <th className="num">Direct</th>
-              <th className="num">Rebills</th>
-              <th className="num">CAC</th>
-              <th className="num">Refund $</th>
-              <th className="num">Scraped</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshots.map((s) => {
-              const isCurrent =
-                s.range_from === current.range_from &&
-                s.range_to === current.range_to;
-              return (
-                <tr
-                  key={`${s.range_from}-${s.range_to}`}
-                  style={
-                    isCurrent
-                      ? { background: "var(--accent-bg)" }
-                      : undefined
-                  }
-                >
-                  <td>
-                    <Link
-                      href={`/subscriptions?from=${s.range_from}&to=${s.range_to}`}
-                      style={{ color: "inherit", textDecoration: "none" }}
-                    >
-                      {periodLabel(s)}
-                    </Link>
-                    {isCurrent ? (
-                      <span
-                        className="phx-tag"
-                        style={{
-                          marginLeft: 8,
-                          fontSize: 9,
-                          padding: "2px 5px",
-                          background: "var(--accent-bg-strong)",
-                        }}
-                      >
-                        VIEWING
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="num">{fmtInt(s.total_transactions_mtd)}</td>
-                  <td className="num muted">{fmtInt(s.direct_sale_count)}</td>
-                  <td className="num muted">
-                    {fmtInt(s.recurring_subscription_count)}
-                  </td>
-                  <td className="num muted">
-                    {s.target_cac != null ? fmtMoney(s.target_cac) : "—"}
-                  </td>
-                  <td className="num muted">{fmtMoney(s.refund_total)}</td>
-                  <td className="num muted">{relTime(s.scraped_at)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function WaveBStub() {
-  return (
-    <div
-      className="card"
-      style={{ padding: 18, color: "var(--muted)", fontSize: 12 }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--muted)",
-          marginBottom: 6,
-        }}
-      >
-        Coming in Wave B
-      </div>
-      <div style={{ color: "var(--text-dim)", lineHeight: 1.5 }}>
-        Retention curve, cohort heatmap, and LTV/CAC require per-subscriber
-        data from the PHX customer list page. Those parsers ship once we grab
-        inspect screenshots of the PHX subscribers and rebill transactions
-        pages.
       </div>
     </div>
   );
