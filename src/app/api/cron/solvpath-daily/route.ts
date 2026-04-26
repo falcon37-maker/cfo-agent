@@ -1,28 +1,20 @@
 // Daily Solvpath sync. Pulls yesterday's PHX subscription data for NOVA /
 // NURA / KOVA so the dashboard always shows fresh Subs Billed + Subs Rev.
 //
-// Triggered by Vercel cron at 08:30 UTC daily (see vercel.json), and also
-// hand-runnable via ?secret=$CRON_SECRET. Loops backfillRevenueForRange in
-// chunks until finished or until we've burned ~12 minutes — Vercel's Pro
-// plan caps this route at 800s, so we keep ~80s headroom under that.
-//
-// The yesterday window is small enough (one day's tx-history per customer)
-// that 3500-ish customers usually finish well inside the cap, but the
-// resumable cursor is here as insurance against transient slowness.
+// Single pass with an internal deadline well under Vercel's 800s cap.
+// backfillRevenueForRange checks its deadline between customer iterations, so
+// it exits cleanly even if Solvpath is slow. If the day doesn't finish in
+// one pass, the response carries a resume cursor and a human re-runs with
+// ?startStatus=&startPage= to finish.
 
 import { NextRequest } from "next/server";
-import {
-  backfillRevenueForRange,
-  type SubscriberStatus,
-} from "@/lib/solvpath/sync";
+import { backfillRevenueForRange } from "@/lib/solvpath/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
-const MAX_CHUNK_DEADLINE_MS = 180_000; // 3 min per chunk
-const MAX_TOTAL_MS = 720_000; // 12 min wall budget for the loop
-const MAX_CHUNKS = 40;
+const DEADLINE_MS = 700_000; // 700s — leaves ~100s for response + persistence
 
 function unauthorized() {
   return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -72,69 +64,47 @@ async function handle(req: NextRequest) {
       ? dateOverride
       : yesterdayUtc();
 
+  // Resume cursor — only used when a previous run got cut off mid-day.
+  const startStatusRaw = req.nextUrl.searchParams.get("startStatus");
+  const startPageRaw = req.nextUrl.searchParams.get("startPage");
+  const startStatus =
+    startStatusRaw === "Active" ||
+    startStatusRaw === "Canceled" ||
+    startStatusRaw === "Never Enrolled"
+      ? startStatusRaw
+      : undefined;
+  const startPage = startPageRaw ? Number(startPageRaw) : undefined;
+
   const startedAt = Date.now();
-  const chunks: Array<{
-    chunk: number;
-    elapsedMs: number;
-    customersSeen: number;
-    finished: boolean;
-    nextStatus: SubscriberStatus | null;
-    nextPage: number | null;
-  }> = [];
+  const result = await backfillRevenueForRange({
+    from: day,
+    to: day,
+    startStatus,
+    startPage,
+    // Reset (= delete existing rows for this day) only on a fresh run, not
+    // when a human is resuming via cursor — otherwise we'd wipe progress.
+    reset: !startStatus && !startPage,
+    // The exported default is 500 customers per chunk; we want one big pass
+    // to process the full ~3500-customer base in a single invocation.
+    maxCustomers: 50_000,
+    throttleMs: 75,
+    deadlineMs: DEADLINE_MS,
+    persist: true,
+  });
 
-  let nextStatus: SubscriberStatus | undefined;
-  let nextPage: number | undefined;
-  let totalCustomers = 0;
-  let totalCustomersWithTx = 0;
-
-  for (let i = 0; i < MAX_CHUNKS; i++) {
-    if (Date.now() - startedAt > MAX_TOTAL_MS) break;
-    const chunkStart = Date.now();
-    const result = await backfillRevenueForRange({
-      from: day,
-      to: day,
-      startStatus: nextStatus,
-      startPage: nextPage,
-      // Reset the (store, day) snapshots only on the first chunk so we don't
-      // wipe progress mid-loop. After the reset, subsequent chunks merge
-      // additively into what we just wrote.
-      reset: i === 0,
-      throttleMs: 100,
-      deadlineMs: MAX_CHUNK_DEADLINE_MS,
-      persist: true,
-    });
-    const p = result.progress;
-    chunks.push({
-      chunk: i + 1,
-      elapsedMs: Date.now() - chunkStart,
-      customersSeen: p.customersSeen,
-      finished: p.finished,
-      nextStatus: p.nextStatus,
-      nextPage: p.nextPage,
-    });
-    totalCustomers += p.customersSeen;
-    totalCustomersWithTx += p.customersWithTx;
-    if (p.finished) break;
-    if (p.nextStatus == null || p.nextPage == null) {
-      // Defensive: if the chunk reported "not finished" but didn't return a
-      // cursor, bail rather than loop forever.
-      break;
-    }
-    nextStatus = p.nextStatus;
-    nextPage = p.nextPage;
-  }
-
-  const finished = chunks[chunks.length - 1]?.finished ?? false;
+  const p = result.progress;
   return Response.json({
     ok: true,
     ranAt: new Date().toISOString(),
     day,
-    finished,
+    finished: p.finished,
     elapsedMs: Date.now() - startedAt,
-    totalCustomers,
-    totalCustomersWithTx,
-    chunkCount: chunks.length,
-    chunks,
+    customersSeen: p.customersSeen,
+    customersWithTx: p.customersWithTx,
+    customersSkippedDup: p.customersSkippedDup,
+    perStoreTotals: result.perStoreTotals,
+    nextStatus: p.nextStatus,
+    nextPage: p.nextPage,
   });
 }
 
