@@ -144,21 +144,28 @@ export default async function ChargebacksPage({
   const timeline = buildTimeline(from, to, alerts, tx.perDay);
 
   const totalAlerts = alerts.length;
-  const wonCount = alerts.filter((a) => a.status === "won").length;
-  const lostCount = alerts.filter((a) => a.status === "lost").length;
+  // Without raw API fields (creditStatus / responseAction) stored, we can't
+  // tell a real "won" from a generic "resolved". Bucket as Resolved + Pending +
+  // Unknown for honesty. Real win/loss split lives on /chargebacks/disputes
+  // once we ingest the raw fields.
+  const resolvedCount = alerts.filter(
+    (a) =>
+      a.status === "won" ||
+      a.status === "lost" ||
+      a.status === "refunded",
+  ).length;
   const pendingCount = alerts.filter((a) => a.status === "pending").length;
-  const refundedCount = alerts.filter((a) => a.status === "refunded").length;
-  const resolvedCount = wonCount + lostCount + refundedCount;
-  const winRatePct =
-    resolvedCount > 0 ? (wonCount / resolvedCount) * 100 : 0;
+  const unknownCount = alerts.filter((a) => a.status === "unknown").length;
+  const resolvedRatePct =
+    totalAlerts > 0 ? (resolvedCount / totalAlerts) * 100 : 0;
 
   const alertAmount = alerts.reduce((s, a) => s + Number(a.amount ?? 0), 0);
   const avgPerAlert = totalAlerts > 0 ? alertAmount / totalAlerts : 0;
 
-  // All stores share a single Chargeblast merchant descriptor today, so the
-  // denominator is portfolio-wide transaction count.
+  // Alert ratio (NOT chargeback ratio) — total Chargeblast alerts of any
+  // type vs total orders. The 1% processor threshold applies to actual
+  // chargebacks, not alerts; that lives on /chargebacks/disputes.
   const ratioPct = txTotal > 0 ? (totalAlerts / txTotal) * 100 : 0;
-  const ratioTone_ = ratioTone(ratioPct);
 
   function qs(p: Record<string, string>): string {
     const sp = new URLSearchParams();
@@ -171,13 +178,15 @@ export default async function ChargebacksPage({
     <div className="dashboard-narrow">
       <div className="pnl-header" style={{ alignItems: "center" }}>
         <div>
-          <div className="greet-eyebrow">Chargebacks</div>
+          <div className="greet-eyebrow">Chargebacks · Alerts</div>
           <h1 className="greet-title">
             <ShieldAlert size={18} strokeWidth={2} /> {rangeLabel}
           </h1>
           <div className="section-sub" style={{ marginTop: 4 }}>
-            Alerts from Chargeblast (Ethoca / CDRN). Processor cap is 1.0% —
-            stay below 0.65% for green.
+            All Chargeblast alerts (FRAUD / DISPUTE / DISPUTE_RDR) — Ethoca,
+            CDRN, RDR. Most resolve when the merchant refunds in time. Real
+            chargebacks (the ones that actually count toward the 1% processor
+            cap) live on the Chargebacks tab.
           </div>
         </div>
         <div className="pnl-controls">
@@ -225,7 +234,7 @@ export default async function ChargebacksPage({
 
       {/* ── KPI row ── */}
       <section>
-        <div className="section-eyebrow">Chargeback signal</div>
+        <div className="section-eyebrow">Alert signal</div>
         <div className="kpi-row">
           <KpiCard
             label="Total Alerts"
@@ -236,32 +245,20 @@ export default async function ChargebacksPage({
             icon={<ShieldAlert size={14} strokeWidth={1.75} />}
           />
           <KpiCard
-            label={`Won ${wonCount} · Lost ${lostCount} · Pending ${pendingCount}`}
-            value={`${winRatePct.toFixed(1)}%`}
+            label={`Resolved ${resolvedCount} · Pending ${pendingCount} · Unknown ${unknownCount}`}
+            value={`${resolvedRatePct.toFixed(1)}%`}
             delta={null}
-            deltaLabel={`win rate (resolved ${fmtInt(resolvedCount)})`}
+            deltaLabel="resolved share — see Chargebacks tab for win/loss"
             spark={[]}
             icon={<Trophy size={14} strokeWidth={1.75} />}
           />
           <KpiCard
-            label="Chargeback Ratio"
+            label="Alert Ratio"
             value={`${ratioPct.toFixed(2)}%`}
             delta={null}
-            deltaLabel={
-              ratioTone_ === "pos"
-                ? "healthy (< 0.65%)"
-                : ratioTone_ === "warn"
-                  ? "warning (0.65–0.85%)"
-                  : "danger (> 0.85%)"
-            }
+            deltaLabel="alerts / total orders (not the 1% chargeback cap)"
             spark={[]}
-            sparkColor={
-              ratioTone_ === "pos"
-                ? "var(--accent)"
-                : ratioTone_ === "warn"
-                  ? "var(--warning, #ffb020)"
-                  : "var(--negative)"
-            }
+            sparkColor="var(--muted-strong)"
             icon={<Gauge size={14} strokeWidth={1.75} />}
           />
           <KpiCard
@@ -280,7 +277,12 @@ export default async function ChargebacksPage({
         <section>
           <div className="section-eyebrow">Alerts over time</div>
           <div className="card" style={{ padding: 16 }}>
-            <ChargebacksTimelineChart days={timeline} />
+            <ChargebacksTimelineChart
+              days={timeline}
+              barLabel="Alerts / day"
+              rateLabel="Alert ratio (7-day)"
+              showThreshold={false}
+            />
           </div>
         </section>
       ) : null}
@@ -304,12 +306,15 @@ export default async function ChargebacksPage({
                 </thead>
                 <tbody>
                   {alerts.slice(0, 20).map((a) => {
+                    // Status display: relabel "won" → "resolved" since we
+                    // can't tell from the stored fields whether the merchant
+                    // actually won or just acted on the alert.
+                    const displayStatus =
+                      a.status === "won" ? "resolved" : a.status;
                     const statusColor =
-                      a.status === "won"
-                        ? "var(--accent)"
-                        : a.status === "lost"
-                          ? "var(--negative)"
-                          : "var(--muted-strong)";
+                      a.status === "lost"
+                        ? "var(--negative)"
+                        : "var(--muted-strong)";
                     const dt = a.chargeblast_created_at
                       ? new Date(a.chargeblast_created_at)
                       : null;
@@ -324,7 +329,7 @@ export default async function ChargebacksPage({
                         <td className="muted">{a.alert_type}</td>
                         <td className="num">{fmtMoney(Number(a.amount ?? 0))}</td>
                         <td style={{ color: statusColor, fontWeight: 600 }}>
-                          {a.status}
+                          {displayStatus}
                         </td>
                         <td
                           className="muted"

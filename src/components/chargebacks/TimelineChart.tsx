@@ -24,7 +24,21 @@ function ratioTone(pct: number): "pos" | "warn" | "neg" {
   return "neg";
 }
 
-export function ChargebacksTimelineChart({ days }: { days: Day[] }) {
+export function ChargebacksTimelineChart({
+  days,
+  barLabel = "Alerts / day",
+  rateLabel = "7-day ratio",
+  showThreshold = true,
+}: {
+  days: Day[];
+  /** Legend label for the bar series. */
+  barLabel?: string;
+  /** Legend label for the rolling rate line — defaults to "7-day ratio". */
+  rateLabel?: string;
+  /** Show the dashed red 1.0% processor-cap line. Off for the alerts tab,
+   *  where the 1% threshold doesn't apply. */
+  showThreshold?: boolean;
+}) {
   if (days.length === 0) return null;
 
   // 7-day rolling ratio for each day (trailing window).
@@ -153,27 +167,31 @@ export function ChargebacksTimelineChart({ days }: { days: Day[] }) {
           );
         })}
 
-        {/* Threshold (red dashed 1%). */}
-        <line
-          x1={PAD_L}
-          x2={W - PAD_R}
-          y1={yThreshold}
-          y2={yThreshold}
-          stroke="var(--negative)"
-          strokeWidth={1.5}
-          strokeDasharray="6 4"
-          opacity={0.9}
-        />
-        <text
-          x={W - PAD_R - 6}
-          y={yThreshold - 4}
-          textAnchor="end"
-          fontSize={10}
-          fill="var(--negative)"
-          fontWeight={600}
-        >
-          1.0% cap
-        </text>
+        {/* Threshold (red dashed 1%) — chargebacks tab only. */}
+        {showThreshold ? (
+          <>
+            <line
+              x1={PAD_L}
+              x2={W - PAD_R}
+              y1={yThreshold}
+              y2={yThreshold}
+              stroke="var(--negative)"
+              strokeWidth={1.5}
+              strokeDasharray="6 4"
+              opacity={0.9}
+            />
+            <text
+              x={W - PAD_R - 6}
+              y={yThreshold - 4}
+              textAnchor="end"
+              fontSize={10}
+              fill="var(--negative)"
+              fontWeight={600}
+            >
+              1.0% cap
+            </text>
+          </>
+        ) : null}
 
         {/* Rolling 7-day ratio line. */}
         <path
@@ -231,7 +249,7 @@ export function ChargebacksTimelineChart({ days }: { days: Day[] }) {
               borderRadius: 2,
             }}
           />
-          Alerts / day
+          {barLabel}
         </span>
         <span>
           <span
@@ -244,23 +262,25 @@ export function ChargebacksTimelineChart({ days }: { days: Day[] }) {
               verticalAlign: "middle",
             }}
           />
-          7-day ratio (now {latest.toFixed(2)}%)
+          {rateLabel} (now {latest.toFixed(2)}%)
         </span>
-        <span>
-          <span
-            style={{
-              display: "inline-block",
-              width: 18,
-              height: 2,
-              background: "var(--negative)",
-              marginRight: 6,
-              verticalAlign: "middle",
-              backgroundImage:
-                "repeating-linear-gradient(90deg, var(--negative) 0 4px, transparent 4px 7px)",
-            }}
-          />
-          1.0% processor cap
-        </span>
+        {showThreshold ? (
+          <span>
+            <span
+              style={{
+                display: "inline-block",
+                width: 18,
+                height: 2,
+                background: "var(--negative)",
+                marginRight: 6,
+                verticalAlign: "middle",
+                backgroundImage:
+                  "repeating-linear-gradient(90deg, var(--negative) 0 4px, transparent 4px 7px)",
+              }}
+            />
+            1.0% processor cap
+          </span>
+        ) : null}
       </div>
     </div>
   );
