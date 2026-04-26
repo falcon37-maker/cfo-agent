@@ -10,7 +10,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getRole } from "@/lib/auth/roles";
 
 export type Tenant = {
   id: string;
@@ -53,35 +52,42 @@ export async function getCurrentTenant(
   return getTenantForUser(user.id, user.email ?? null);
 }
 
-/** Fetch the tenant row for a known user_id. Service-role client.
- *
- *  PHASE 1C STOPGAP: manager-role users (employees with limited access)
- *  don't get their own tenant — they share their admin's. Until phase 1D
- *  adds a real `tenant_memberships` table, we fall back to the
- *  earliest-created active tenant when the manager has no row of their own. */
+/** Fetch the tenant for a user. Resolution order:
+ *   1. owned tenant (tenants.user_id = userId) — fast path for the
+ *      common case
+ *   2. tenant_memberships join (covers shared-access users like the
+ *      manager email)
+ *   Throws if neither yields a tenant. */
 export async function getTenantForUser(
   userId: string,
-  userEmail?: string | null,
+  // userEmail kept for log/error context only — no longer load-bearing
+  // for the manager fallback (memberships replaced it in migration 013).
+  _userEmail?: string | null,
 ): Promise<Tenant> {
   const sb = supabaseAdmin();
-  const { data, error } = await sb
+
+  const { data: owned, error: ownErr } = await sb
     .from("tenants")
     .select("*")
     .eq("user_id", userId)
     .maybeSingle();
-  if (data) return data as Tenant;
-  if (error) throw new Error(`getTenantForUser: ${error.message}`);
+  if (ownErr) throw new Error(`getTenantForUser: ${ownErr.message}`);
+  if (owned) return owned as Tenant;
 
-  if (userEmail && getRole(userEmail) === "manager") {
-    const { data: shared } = await sb
-      .from("tenants")
-      .select("*")
-      .eq("is_active", true)
-      .order("created_at")
-      .limit(1)
-      .maybeSingle();
-    if (shared) return shared as Tenant;
-  }
+  // Membership lookup: if the user belongs to another tenant via
+  // tenant_memberships, return that tenant. Pick the membership with the
+  // lowest-privilege role last so an explicit owner/admin row beats a
+  // legacy manager row when both exist.
+  const { data: memberships } = await sb
+    .from("tenant_memberships")
+    .select("tenant_id, role, tenants(*)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  const membership = memberships?.[0] as
+    | { tenant_id: string; role: string; tenants: Tenant }
+    | undefined;
+  if (membership?.tenants) return membership.tenants;
 
   throw new Error(
     `No tenant found for user ${userId}. Sign up should provision one — ` +
