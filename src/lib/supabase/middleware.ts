@@ -8,7 +8,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getRole, canAccess, defaultHome } from "@/lib/auth/roles";
 
 /** Paths exempt from auth — everything else requires a valid session. */
-const PUBLIC_PATHS = new Set<string>(["/login"]);
+const PUBLIC_PATHS = new Set<string>(["/login", "/signup"]);
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
@@ -62,8 +62,8 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Authenticated + on /login → bounce to ?next= or role's default home.
-  if (user && pathname === "/login") {
+  // Authenticated + on /login or /signup → bounce to ?next= or default home.
+  if (user && (pathname === "/login" || pathname === "/signup")) {
     const role = getRole(user.email);
     const next = request.nextUrl.searchParams.get("next") || defaultHome(role);
     const target = canAccess(role, next) ? next : defaultHome(role);

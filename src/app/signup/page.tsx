@@ -1,21 +1,22 @@
+import Link from "next/link";
 import { LineChart } from "lucide-react";
-import { LoginForm } from "@/components/login/LoginForm";
+import { SignupForm } from "@/components/login/SignupForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage({
+const ERR_MAP: Record<string, string> = {
+  missing: "Enter your email and password.",
+  short: "Password must be at least 8 characters.",
+};
+
+export default async function SignupPage({
   searchParams,
 }: {
-  searchParams: Promise<{ err?: string; next?: string }>;
+  searchParams: Promise<{ err?: string }>;
 }) {
   const params = await searchParams;
-  const errMessage =
-    params.err === "bad"
-      ? "Incorrect email or password."
-      : params.err === "missing"
-        ? "Enter your email and password to continue."
-        : null;
-  const nextPath = params.next?.startsWith("/") ? params.next : "/";
+  const errKey = params.err ?? "";
+  const errMessage = ERR_MAP[errKey] ?? (errKey ? decodeURIComponent(errKey) : null);
   const year = new Date().getFullYear();
 
   return (
@@ -38,39 +39,40 @@ export default async function LoginPage({
           <div className="auth-quote">
             <div className="auth-live">
               <span />
-              Agent is watching
+              Your financial cockpit
             </div>
             <h2 className="auth-head">
-              Your AI CFO,
+              One dashboard for the
               <br />
-              on the clock{" "}
+              numbers that{" "}
               <span className="mono" style={{ color: "var(--accent)" }}>
-                24/7
+                matter
               </span>
             </h2>
           </div>
 
-          <div className="auth-foot">© {year} CFO Agent · Falcon 37 LLC</div>
+          <div className="auth-foot">© {year} CFO Agent</div>
         </div>
       </aside>
 
       <main className="auth-right">
         <div className="auth-card">
           <div className="auth-card-head">
-            <div className="eyebrow">Welcome back</div>
-            <h1 className="auth-title">Sign in to your workspace</h1>
+            <div className="eyebrow">Create your workspace</div>
+            <h1 className="auth-title">Start for free</h1>
             <div className="auth-card-sub">
-              Use your work email. We&apos;ll sync your stores after sign-in.
+              Sign up with email and password. We&apos;ll get you to a
+              dashboard in 30 seconds.
             </div>
           </div>
 
-          <LoginForm nextPath={nextPath} errMessage={errMessage} />
+          <SignupForm errMessage={errMessage} />
 
           <div className="auth-card-foot">
-            Don&apos;t have an account?{" "}
-            <a href="/signup" style={{ color: "var(--accent)" }}>
-              Create one
-            </a>
+            Already have an account?{" "}
+            <Link href="/login" style={{ color: "var(--accent)" }}>
+              Sign in
+            </Link>
           </div>
         </div>
       </main>

@@ -10,6 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getRole } from "@/lib/auth/roles";
 
 export type Tenant = {
   id: string;
@@ -49,25 +50,43 @@ export async function getCurrentTenant(
   if (error || !user) {
     throw new Error("Not authenticated");
   }
-  return getTenantForUser(user.id);
+  return getTenantForUser(user.id, user.email ?? null);
 }
 
-/** Fetch the tenant row for a known user_id. Service-role client. */
-export async function getTenantForUser(userId: string): Promise<Tenant> {
+/** Fetch the tenant row for a known user_id. Service-role client.
+ *
+ *  PHASE 1C STOPGAP: manager-role users (employees with limited access)
+ *  don't get their own tenant — they share their admin's. Until phase 1D
+ *  adds a real `tenant_memberships` table, we fall back to the
+ *  earliest-created active tenant when the manager has no row of their own. */
+export async function getTenantForUser(
+  userId: string,
+  userEmail?: string | null,
+): Promise<Tenant> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("tenants")
     .select("*")
     .eq("user_id", userId)
     .maybeSingle();
+  if (data) return data as Tenant;
   if (error) throw new Error(`getTenantForUser: ${error.message}`);
-  if (!data) {
-    throw new Error(
-      `No tenant found for user ${userId}. Sign up should provision one — ` +
-        `see ensure_owner_tenant() in migration 010.`,
-    );
+
+  if (userEmail && getRole(userEmail) === "manager") {
+    const { data: shared } = await sb
+      .from("tenants")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at")
+      .limit(1)
+      .maybeSingle();
+    if (shared) return shared as Tenant;
   }
-  return data as Tenant;
+
+  throw new Error(
+    `No tenant found for user ${userId}. Sign up should provision one — ` +
+      `see ensure_owner_tenant() in migration 010.`,
+  );
 }
 
 /** All active tenants. Used by cron jobs to iterate every tenant's data. */
