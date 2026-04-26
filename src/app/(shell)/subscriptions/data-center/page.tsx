@@ -7,6 +7,7 @@ import {
 } from "@/lib/phx/queries";
 import { loadStores } from "@/lib/pnl/queries";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
@@ -69,11 +70,13 @@ async function loadDailyPnlFees(
   from: string,
   to: string,
   storeIds: string[],
+  tenantId: string,
 ): Promise<DailyPnlRow[]> {
   const sb = supabaseAdmin();
   let q = sb
     .from("daily_pnl")
     .select("store_id, date, fees, refunds")
+    .eq("tenant_id", tenantId)
     .gte("date", from)
     .lte("date", to);
   if (storeIds.length > 0) q = q.in("store_id", storeIds);
@@ -84,11 +87,13 @@ async function loadDailyPnlFees(
 async function loadAlertsInWindow(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<number> {
   const sb = supabaseAdmin();
   const { data } = await sb
     .from("chargeblast_alerts")
     .select("amount")
+    .eq("tenant_id", tenantId)
     .gte("chargeblast_created_at", `${from}T00:00:00Z`)
     .lte("chargeblast_created_at", `${to}T23:59:59Z`);
   return (data ?? []).reduce(
@@ -121,7 +126,8 @@ export default async function SubscriptionsDataCenterPage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
-  const stores = await loadStores();
+  const tenant = await requireTenant();
+  const stores = await loadStores(tenant.id);
   const phxStores = stores.map((s) => s.id).filter((id) => PHX_STORE_IDS.has(id));
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
@@ -131,10 +137,10 @@ export default async function SubscriptionsDataCenterPage({
     PHX_FEE_RATE_FALLBACK;
 
   const [snapshot, phxDays, pnlRows, alertCost] = await Promise.all([
-    loadLatestPortfolioSnapshot(),
-    loadPhxDailyRows(from, to, selectedPhx),
-    loadDailyPnlFees(from, to, selectedPhx),
-    loadAlertsInWindow(from, to),
+    loadLatestPortfolioSnapshot(tenant.id),
+    loadPhxDailyRows(from, to, selectedPhx, tenant.id),
+    loadDailyPnlFees(from, to, selectedPhx, tenant.id),
+    loadAlertsInWindow(from, to, tenant.id),
   ]);
 
   // ── per-store + per-type aggregation ─────────────────────────────────────

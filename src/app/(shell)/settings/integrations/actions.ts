@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ping } from "@/lib/chargeblast/client";
 import { syncAlerts } from "@/lib/chargeblast/sync";
+import { requireTenant } from "@/lib/tenant";
 
 function encode(s: string): string {
   return encodeURIComponent(s).slice(0, 200);
@@ -33,7 +34,11 @@ export async function syncChargeblastAction(): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   try {
-    const r = await syncAlerts({ start_date: weekAgo, end_date: today });
+    const tenant = await requireTenant();
+    const r = await syncAlerts(tenant.id, {
+      start_date: weekAgo,
+      end_date: today,
+    });
     revalidatePath("/chargebacks");
     redirect(
       `/settings/integrations?cb_sync=ok&cb_seen=${r.seen}&cb_mapped=${r.mapped}&cb_upserted=${r.upserted}`,

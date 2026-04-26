@@ -9,6 +9,7 @@
 
 import { NextRequest } from "next/server";
 import { backfillRevenueForRange } from "@/lib/solvpath/sync";
+import { listActiveTenants } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,35 +77,54 @@ async function handle(req: NextRequest) {
   const startPage = startPageRaw ? Number(startPageRaw) : undefined;
 
   const startedAt = Date.now();
-  const result = await backfillRevenueForRange({
-    from: day,
-    to: day,
-    startStatus,
-    startPage,
-    // Reset (= delete existing rows for this day) only on a fresh run, not
-    // when a human is resuming via cursor — otherwise we'd wipe progress.
-    reset: !startStatus && !startPage,
-    // The exported default is 500 customers per chunk; we want one big pass
-    // to process the full ~3500-customer base in a single invocation.
-    maxCustomers: 50_000,
-    throttleMs: 75,
-    deadlineMs: DEADLINE_MS,
-    persist: true,
-  });
+  const tenants = await listActiveTenants();
+  // Split the deadline budget across tenants so a single slow tenant can't
+  // starve the others. With one tenant today we just hand it the full
+  // DEADLINE_MS; with N we divide.
+  const perTenantDeadline =
+    tenants.length > 0 ? Math.floor(DEADLINE_MS / tenants.length) : DEADLINE_MS;
 
-  const p = result.progress;
+  const tenantResults: Array<Record<string, unknown>> = [];
+  for (const tenant of tenants) {
+    try {
+      const r = await backfillRevenueForRange({
+        tenantId: tenant.id,
+        from: day,
+        to: day,
+        startStatus,
+        startPage,
+        reset: !startStatus && !startPage,
+        maxCustomers: 50_000,
+        throttleMs: 75,
+        deadlineMs: perTenantDeadline,
+        persist: true,
+      });
+      const p = r.progress;
+      tenantResults.push({
+        tenant: tenant.display_name,
+        finished: p.finished,
+        customersSeen: p.customersSeen,
+        customersWithTx: p.customersWithTx,
+        customersSkippedDup: p.customersSkippedDup,
+        perStoreTotals: r.perStoreTotals,
+        nextStatus: p.nextStatus,
+        nextPage: p.nextPage,
+      });
+    } catch (err) {
+      tenantResults.push({
+        tenant: tenant.display_name,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   return Response.json({
     ok: true,
     ranAt: new Date().toISOString(),
     day,
-    finished: p.finished,
     elapsedMs: Date.now() - startedAt,
-    customersSeen: p.customersSeen,
-    customersWithTx: p.customersWithTx,
-    customersSkippedDup: p.customersSkippedDup,
-    perStoreTotals: result.perStoreTotals,
-    nextStatus: p.nextStatus,
-    nextPage: p.nextPage,
+    tenantResults,
   });
 }
 

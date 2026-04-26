@@ -16,6 +16,7 @@ import {
   type PhxSnapshot,
 } from "@/lib/phx/queries";
 import { loadStores } from "@/lib/pnl/queries";
+import { requireTenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
@@ -70,11 +71,13 @@ async function loadDailyPnl(
   from: string,
   to: string,
   storeIds: string[],
+  tenantId: string,
 ): Promise<DailyPnlRow[]> {
   const sb = supabaseAdmin();
   let q = sb
     .from("daily_pnl")
     .select("store_id, date, ad_spend, cogs, fees")
+    .eq("tenant_id", tenantId)
     .gte("date", from)
     .lte("date", to);
   if (storeIds.length > 0) q = q.in("store_id", storeIds);
@@ -191,15 +194,16 @@ export default async function SubscriptionsOverviewPage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
-  const stores = await loadStores();
+  const tenant = await requireTenant();
+  const stores = await loadStores(tenant.id);
   const phxStores = stores.map((s) => s.id).filter((id) => PHX_STORE_IDS.has(id));
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
   const [snapshot, phxDays, pnlRows] = await Promise.all([
-    loadLatestPortfolioSnapshot(),
-    loadPhxDailyRows(from, to, selectedPhx),
-    loadDailyPnl(from, to, selectedPhx),
+    loadLatestPortfolioSnapshot(tenant.id),
+    loadPhxDailyRows(from, to, selectedPhx, tenant.id),
+    loadDailyPnl(from, to, selectedPhx, tenant.id),
   ]);
 
   const ledger = buildLedger(phxDays, pnlRows);

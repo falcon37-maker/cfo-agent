@@ -83,14 +83,18 @@ export type PhxStoreSnapshot = {
  * When `range` is passed, only snapshots whose period is contained in
  * [range.from, range.to] are considered.
  */
-export async function loadLatestPortfolioSnapshot(range?: {
-  from: string;
-  to: string;
-}): Promise<PhxSnapshot | null> {
+export async function loadLatestPortfolioSnapshot(
+  tenantId: string,
+  range?: {
+    from: string;
+    to: string;
+  },
+): Promise<PhxSnapshot | null> {
   const sb = supabaseAdmin();
   let q = sb
     .from("phx_summary_snapshots")
     .select("*")
+    .eq("tenant_id", tenantId)
     .eq("store_id", "PORTFOLIO");
   if (range) {
     q = q.gte("range_from", range.from).lte("range_to", range.to);
@@ -110,12 +114,14 @@ export async function loadLatestPortfolioSnapshot(range?: {
 export async function loadPhxSnapshotsOverlapping(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<PhxSnapshot[]> {
   const sb = supabaseAdmin();
   // Period overlaps window when range_from <= to AND range_to >= from.
   const { data, error } = await sb
     .from("phx_summary_snapshots")
     .select("*")
+    .eq("tenant_id", tenantId)
     .eq("store_id", "PORTFOLIO")
     .lte("range_from", to)
     .gte("range_to", from)
@@ -133,12 +139,14 @@ export async function loadPhxStoreSnapshotsOverlapping(
   from: string,
   to: string,
   storeIds: string[],
+  tenantId: string,
 ): Promise<PhxSnapshot[]> {
   if (storeIds.length === 0) return [];
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("phx_summary_snapshots")
     .select("*")
+    .eq("tenant_id", tenantId)
     .in("store_id", storeIds)
     .lte("range_from", to)
     .gte("range_to", from)
@@ -160,12 +168,14 @@ export async function loadPhxDailyRows(
   from: string,
   to: string,
   storeIds: string[],
+  tenantId: string,
 ): Promise<PhxSnapshot[]> {
   if (storeIds.length === 0) return [];
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("phx_summary_snapshots")
     .select("*")
+    .eq("tenant_id", tenantId)
     .in("store_id", storeIds)
     .gte("range_from", from)
     .lte("range_to", to);
@@ -176,11 +186,15 @@ export async function loadPhxDailyRows(
 }
 
 /** All portfolio snapshots ordered newest period first (for a history grid). */
-export async function loadPortfolioSnapshots(limit = 24): Promise<PhxSnapshot[]> {
+export async function loadPortfolioSnapshots(
+  tenantId: string,
+  limit = 24,
+): Promise<PhxSnapshot[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("phx_summary_snapshots")
     .select("*")
+    .eq("tenant_id", tenantId)
     .eq("store_id", "PORTFOLIO")
     .order("range_to", { ascending: false })
     .limit(limit);

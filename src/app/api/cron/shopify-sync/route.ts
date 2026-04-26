@@ -25,6 +25,7 @@ import {
   describeConfiguredTokens,
 } from "@/lib/shopify/stores";
 import { syncAlerts } from "@/lib/chargeblast/sync";
+import { listActiveTenants } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,14 +68,10 @@ async function handle(request: NextRequest) {
   if (!ok) return unauthorized();
 
   const sb = supabaseAdmin();
-  const { data: stores, error: storesErr } = await sb
-    .from("stores")
-    .select("id, timezone, shop_domain")
-    .eq("is_active", true)
-    .neq("id", "PORTFOLIO");
-  if (storesErr) {
-    return Response.json({ error: storesErr.message }, { status: 500 });
-  }
+
+  // Iterate every active tenant — phase 1B's cron loop. Each tenant's stores
+  // and Chargeblast alerts are pulled separately; tenant_id flows through.
+  const tenants = await listActiveTenants();
 
   // Optional explicit date override for backfills: ?date=YYYY-MM-DD.
   const dateOverride = request.nextUrl.searchParams.get("date");
@@ -84,61 +81,76 @@ async function handle(request: NextRequest) {
       : null;
 
   const started = Date.now();
-  const results = [];
-  const skipped: string[] = [];
-  for (const store of stores ?? []) {
-    // Skip historical / dead stores that have daily_pnl rows but no live
-    // Shopify API credentials (e.g. NEEDOH — CSV-imported).
-    if (!hasStoreCreds(store.id)) {
-      skipped.push(store.id);
+  const results: Array<Record<string, unknown>> = [];
+  const skipped: Array<{ tenant: string; store: string }> = [];
+  const chargeblastByTenant: Array<Record<string, unknown>> = [];
+
+  for (const tenant of tenants) {
+    const { data: stores, error: storesErr } = await sb
+      .from("stores")
+      .select("id, timezone, shop_domain")
+      .eq("tenant_id", tenant.id)
+      .eq("is_active", true)
+      .neq("id", "PORTFOLIO");
+    if (storesErr) {
+      results.push({ tenant: tenant.display_name, error: storesErr.message });
       continue;
     }
-    const date = explicit ?? yesterdayInTz(store.timezone ?? "UTC");
-    try {
-      const pull = await syncDailyOrders(store.id, date);
-      const pnl = await computeDailyPnl(store.id, date);
-      results.push({
-        store: store.id,
-        date,
-        ok: true,
-        orderCount: pull.orderCount,
-        grossSales: pull.grossSales,
-        netProfit: pnl?.net_profit ?? null,
-      });
-    } catch (err) {
-      results.push({
-        store: store.id,
-        date,
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    for (const store of stores ?? []) {
+      if (!hasStoreCreds(store.id)) {
+        skipped.push({ tenant: tenant.display_name, store: store.id });
+        continue;
+      }
+      const date = explicit ?? yesterdayInTz(store.timezone ?? "UTC");
+      try {
+        const pull = await syncDailyOrders(store.id, date, tenant.id);
+        const pnl = await computeDailyPnl(store.id, date, tenant.id);
+        results.push({
+          tenant: tenant.display_name,
+          store: store.id,
+          date,
+          ok: true,
+          orderCount: pull.orderCount,
+          grossSales: pull.grossSales,
+          netProfit: pnl?.net_profit ?? null,
+        });
+      } catch (err) {
+        results.push({
+          tenant: tenant.display_name,
+          store: store.id,
+          date,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Chargeblast pull — last 7 days so status updates on older alerts flow in.
+    if (process.env.CHARGEBLAST_API_KEY) {
+      const today = new Date().toISOString().slice(0, 10);
+      const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+      try {
+        const r = await syncAlerts(tenant.id, {
+          start_date: weekAgo,
+          end_date: today,
+        });
+        chargeblastByTenant.push({
+          tenant: tenant.display_name,
+          ok: true,
+          ...r,
+        });
+      } catch (err) {
+        chargeblastByTenant.push({
+          tenant: tenant.display_name,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 
-  // Chargeblast pull — last 7 days so status updates on older alerts flow in.
-  // Wrapped in try/catch so a Chargeblast failure doesn't mask Shopify results.
-  let chargeblast: {
-    ok: boolean;
-    seen?: number;
-    mapped?: number;
-    unmapped?: number;
-    upserted?: number;
-    error?: string;
-  } = { ok: false };
-  if (process.env.CHARGEBLAST_API_KEY) {
-    const today = new Date().toISOString().slice(0, 10);
-    const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
-    try {
-      const r = await syncAlerts({ start_date: weekAgo, end_date: today });
-      chargeblast = { ok: true, ...r };
-    } catch (err) {
-      chargeblast = {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  } else {
-    chargeblast = { ok: false, error: "CHARGEBLAST_API_KEY not set" };
+  if (!process.env.CHARGEBLAST_API_KEY) {
+    chargeblastByTenant.push({ ok: false, error: "CHARGEBLAST_API_KEY not set" });
   }
 
   return Response.json({
@@ -150,7 +162,8 @@ async function handle(request: NextRequest) {
     configuredInEnv: listConfiguredStores(),
     tokenShapes: describeConfiguredTokens(),
     results,
-    chargeblast,
+    chargeblast: chargeblastByTenant,
+    tenants: tenants.map((t) => t.display_name),
   });
 }
 

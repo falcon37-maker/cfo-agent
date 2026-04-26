@@ -94,13 +94,14 @@ export type DashboardData = {
   storeMix: PerStorePoint[];
 };
 
-export async function loadStores(): Promise<StoreInfo[]> {
+export async function loadStores(tenantId: string): Promise<StoreInfo[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("stores")
     .select(
       "id, name, currency, timezone, shop_domain, processing_fee_pct",
     )
+    .eq("tenant_id", tenantId)
     .eq("is_active", true)
     .order("id");
   if (error) throw new Error(`loadStores: ${error.message}`);
@@ -111,13 +112,18 @@ export async function loadStores(): Promise<StoreInfo[]> {
 }
 
 /** Fetch raw daily_pnl rows (one per store-day) in the inclusive [from, to] window. */
-async function loadPnlRowsInRange(from: string, to: string): Promise<RawPnlRow[]> {
+async function loadPnlRowsInRange(
+  from: string,
+  to: string,
+  tenantId: string,
+): Promise<RawPnlRow[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("daily_pnl")
     .select(
       "store_id, date, revenue, cogs, fees, refunds, ad_spend, gross_profit, net_profit, margin_pct, order_count",
     )
+    .eq("tenant_id", tenantId)
     .gte("date", from)
     .lte("date", to)
     .order("date", { ascending: false });
@@ -126,10 +132,13 @@ async function loadPnlRowsInRange(from: string, to: string): Promise<RawPnlRow[]
 }
 
 /** Convenience: last `days` days ending today (UTC). */
-async function loadPnlRows(days: number): Promise<RawPnlRow[]> {
+async function loadPnlRows(
+  days: number,
+  tenantId: string,
+): Promise<RawPnlRow[]> {
   const to = todayUtc();
   const from = addDays(to, -(days - 1));
-  return loadPnlRowsInRange(from, to);
+  return loadPnlRowsInRange(from, to, tenantId);
 }
 
 type RawPnlRow = {
@@ -147,9 +156,10 @@ type RawPnlRow = {
 };
 
 export async function loadDashboardData(
+  tenantId: string,
   rangeSpec?: { days: number } | { from: string; to: string },
 ): Promise<DashboardData> {
-  const stores = await loadStores();
+  const stores = await loadStores(tenantId);
 
   // Resolve range.
   const today = todayUtc();
@@ -168,7 +178,7 @@ export async function loadDashboardData(
   // Pull current range + the same-size prior period (for deltas) in one query.
   const priorTo = addDays(from, -1);
   const priorFrom = addDays(priorTo, -(days - 1));
-  const allRows = await loadPnlRowsInRange(priorFrom, to);
+  const allRows = await loadPnlRowsInRange(priorFrom, to, tenantId);
   const curRows = allRows.filter((r) => r.date >= from && r.date <= to);
   const priorRows = allRows.filter(
     (r) => r.date >= priorFrom && r.date <= priorTo,
@@ -356,9 +366,10 @@ function rollupPhxByDay(rows: PhxSnapshot[]): Map<string, PhxDayTotals> {
 }
 
 export async function loadBlendedDashboardData(
+  tenantId: string,
   rangeSpec?: { days: number } | { from: string; to: string },
 ): Promise<BlendedDashboardData> {
-  const stores = await loadStores();
+  const stores = await loadStores(tenantId);
   const feeRate =
     Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) || 0.1;
 
@@ -379,7 +390,7 @@ export async function loadBlendedDashboardData(
   // Pull current + prior range's Shopify rows in one query.
   const priorTo = addDays(from, -1);
   const priorFrom = addDays(priorTo, -(days - 1));
-  const allPnl = await loadPnlRowsInRange(priorFrom, to);
+  const allPnl = await loadPnlRowsInRange(priorFrom, to, tenantId);
   const curPnl = allPnl.filter((r) => r.date >= from && r.date <= to);
   const priorPnl = allPnl.filter(
     (r) => r.date >= priorFrom && r.date <= priorTo,
@@ -390,8 +401,8 @@ export async function loadBlendedDashboardData(
   const phxStoreIds = stores
     .map((s) => s.id)
     .filter((id) => PHX_STORE_IDS.has(id));
-  const phxCur = await loadPhxDailyRows(from, to, phxStoreIds);
-  const phxPrior = await loadPhxDailyRows(priorFrom, priorTo, phxStoreIds);
+  const phxCur = await loadPhxDailyRows(from, to, phxStoreIds, tenantId);
+  const phxPrior = await loadPhxDailyRows(priorFrom, priorTo, phxStoreIds, tenantId);
   const phxByDayCur = rollupPhxByDay(phxCur);
   const phxByDayPrior = rollupPhxByDay(phxPrior);
 
@@ -600,12 +611,13 @@ export type PnlLedger = {
 export async function loadPnlLedger(
   rangeSpec: { days: number } | { from: string; to: string },
   storeFilter: string | string[],
+  tenantId: string,
 ): Promise<PnlLedger> {
-  const stores = await loadStores();
+  const stores = await loadStores(tenantId);
   const rows =
     "from" in rangeSpec
-      ? await loadPnlRowsInRange(rangeSpec.from, rangeSpec.to)
-      : await loadPnlRows(rangeSpec.days);
+      ? await loadPnlRowsInRange(rangeSpec.from, rangeSpec.to, tenantId)
+      : await loadPnlRows(rangeSpec.days, tenantId);
 
   const selected = normalizeStoreFilter(storeFilter);
   const filtered =
@@ -629,7 +641,7 @@ export async function loadPnlLedger(
       ? rangeSpec.from
       : addDays(todayUtc(), -(rangeSpec.days - 1));
   const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
-  const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter);
+  const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter, tenantId);
 
   // Subs Rev = Recurring + Salvage only. PHX "Initial" and "Direct" both
   // flow through the Shopify checkout, so daily_pnl.revenue already counts

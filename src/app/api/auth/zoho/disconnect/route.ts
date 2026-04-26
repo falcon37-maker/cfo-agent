@@ -4,12 +4,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { deleteCredentials } from "@/lib/zoho/tokens";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    await deleteCredentials();
+    const tenant = await requireTenant();
+    await deleteCredentials(tenant.id);
     const origin = new URL(req.url).origin;
     return NextResponse.redirect(
       `${origin}/settings/integrations?zoho_disconnected=1`,

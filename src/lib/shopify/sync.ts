@@ -67,6 +67,7 @@ export type DailyPullResult = {
 export async function syncDailyOrders(
   storeCode: string,
   date: string,
+  tenantId: string,
 ): Promise<DailyPullResult> {
   const creds = getStoreCreds(storeCode);
   const sb = supabaseAdmin();
@@ -74,6 +75,7 @@ export async function syncDailyOrders(
   const { data: storeRow } = await sb
     .from("stores")
     .select("id, timezone, currency")
+    .eq("tenant_id", tenantId)
     .eq("id", creds.code)
     .maybeSingle();
 
@@ -119,6 +121,7 @@ export async function syncDailyOrders(
   const netRevenue = round2(grossSales - discounts - refunds);
 
   const row = {
+    tenant_id: tenantId,
     store_id: creds.code,
     date,
     order_count: orderCount,

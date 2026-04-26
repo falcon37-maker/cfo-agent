@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { loadShopCsv } from "@/lib/import/shop-csv";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,11 +33,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const tenant = await requireTenant();
     const sb = supabaseAdmin();
 
     const { data: store, error: storeErr } = await sb
       .from("stores")
       .select("id, currency")
+      .eq("tenant_id", tenant.id)
       .eq("id", storeCode)
       .maybeSingle();
     if (storeErr) throw new Error(`stores lookup failed: ${storeErr.message}`);
@@ -57,6 +60,7 @@ export async function POST(request: NextRequest) {
       const grossProfit = r.revenue - r.cogs;
       const marginPct = r.revenue > 0 ? (r.netProfit / r.revenue) * 100 : 0;
       return {
+        tenant_id: tenant.id,
         store_id: storeCode,
         date: r.date,
         revenue: round2(r.revenue),
@@ -74,6 +78,7 @@ export async function POST(request: NextRequest) {
     });
 
     const ordersRows = rows.map((r) => ({
+      tenant_id: tenant.id,
       store_id: storeCode,
       date: r.date,
       order_count: r.orders,
@@ -91,6 +96,7 @@ export async function POST(request: NextRequest) {
     const adRows = rows
       .filter((r) => r.facebookSpend > 0)
       .map((r) => ({
+        tenant_id: tenant.id,
         store_id: storeCode,
         date: r.date,
         platform: "facebook",

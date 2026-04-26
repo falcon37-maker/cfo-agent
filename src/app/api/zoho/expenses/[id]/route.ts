@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { zohoFetch } from "@/lib/zoho/client";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +11,11 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const tenant = await requireTenant();
     const { id } = await params;
     const body = await req.json();
     const data = await zohoFetch<unknown>(
+      tenant.id,
       `/expenses/${encodeURIComponent(id)}`,
       { method: "PUT", body },
     );

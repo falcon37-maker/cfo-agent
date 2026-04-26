@@ -4,6 +4,7 @@
 // on /chargebacks (the Alerts tab).
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
@@ -66,6 +67,7 @@ function isDispute(a: { alert_type: string | null }): boolean {
 async function loadDisputesInWindow(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<AlertRow[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
@@ -73,6 +75,7 @@ async function loadDisputesInWindow(
     .select(
       "id, card_brand, alert_type, amount, status, reason, order_id, customer_email, chargeblast_created_at, merchant_descriptor",
     )
+    .eq("tenant_id", tenantId)
     .gte("chargeblast_created_at", `${from}T00:00:00Z`)
     .lte("chargeblast_created_at", `${to}T23:59:59Z`)
     .order("chargeblast_created_at", { ascending: false });
@@ -83,11 +86,13 @@ async function loadDisputesInWindow(
 async function loadOrdersInWindow(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<{ total: number; perDay: Map<string, number> }> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("daily_pnl")
     .select("date, order_count")
+    .eq("tenant_id", tenantId)
     .gte("date", from)
     .lte("date", to);
   if (error || !data) return { total: 0, perDay: new Map() };
@@ -146,9 +151,10 @@ export default async function ChargebacksDisputesPage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
+  const tenant = await requireTenant();
   const [disputes, tx] = await Promise.all([
-    loadDisputesInWindow(from, to),
-    loadOrdersInWindow(from, to),
+    loadDisputesInWindow(from, to, tenant.id),
+    loadOrdersInWindow(from, to, tenant.id),
   ]);
   const timeline = buildTimeline(from, to, disputes, tx.perDay);
 

@@ -1,6 +1,7 @@
 import { loadCredentials, zohoEnv } from "@/lib/zoho/tokens";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hasStoreCreds } from "@/lib/shopify/stores";
+import { requireTenant } from "@/lib/tenant";
 import {
   pingChargeblastAction,
   syncChargeblastAction,
@@ -26,11 +27,12 @@ type ShopifyStoreRow = {
   last_synced_at?: string | null;
 };
 
-async function loadShopifyStores(): Promise<ShopifyStoreRow[]> {
+async function loadShopifyStores(tenantId: string): Promise<ShopifyStoreRow[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("stores")
     .select("id, name, shop_domain, is_active, processing_fee_pct")
+    .eq("tenant_id", tenantId)
     .eq("is_active", true)
     .neq("id", "PORTFOLIO")
     .neq("id", "__BACKFILL_DEDUPE__")
@@ -57,9 +59,10 @@ export default async function IntegrationsSettingsPage({
   }>;
 }) {
   const params = await searchParams;
+  const tenant = await requireTenant();
   const [creds, shopifyStores] = await Promise.all([
-    loadCredentials(),
-    loadShopifyStores(),
+    loadCredentials(tenant.id),
+    loadShopifyStores(tenant.id),
   ]);
   const { ORG_ID } = zohoEnv();
   const connected = Boolean(creds);

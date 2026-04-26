@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { loadPnlLedger } from "@/lib/pnl/queries";
+import { requireTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,9 +34,11 @@ export async function GET(request: NextRequest) {
   const range = params.get("range") ?? "30d";
   const days = RANGE_DAYS[range] ?? 30;
 
+  const tenant = await requireTenant();
   const ledger = await loadPnlLedger(
     hasCustom ? { from: from!, to: to! } : { days },
     selectedStores,
+    tenant.id,
   );
 
   const header = [

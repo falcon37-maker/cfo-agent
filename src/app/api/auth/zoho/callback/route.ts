@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { saveCredentials, zohoEnv } from "@/lib/zoho/tokens";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +60,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const tenant = await requireTenant();
   await saveCredentials(
+    tenant.id,
     json.access_token,
     json.refresh_token,
     json.expires_in ?? 3600,

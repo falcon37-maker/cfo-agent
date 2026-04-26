@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtMoney, fmtInt } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
@@ -53,6 +54,7 @@ type AlertRow = {
 async function loadAlertsInWindow(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<AlertRow[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
@@ -60,6 +62,7 @@ async function loadAlertsInWindow(
     .select(
       "id, store_id, card_brand, alert_type, amount, currency, status, reason, order_id, customer_email, chargeblast_created_at, merchant_descriptor",
     )
+    .eq("tenant_id", tenantId)
     .gte("chargeblast_created_at", `${from}T00:00:00Z`)
     .lte("chargeblast_created_at", `${to}T23:59:59Z`)
     .order("chargeblast_created_at", { ascending: false });
@@ -73,11 +76,13 @@ async function loadAlertsInWindow(
 async function loadTransactionsInWindow(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<{ total: number; perDay: Map<string, number> }> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("daily_pnl")
     .select("date, order_count")
+    .eq("tenant_id", tenantId)
     .gte("date", from)
     .lte("date", to);
   if (error || !data) return { total: 0, perDay: new Map() };
@@ -136,9 +141,10 @@ export default async function ChargebacksPage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
+  const tenant = await requireTenant();
   const [alerts, tx] = await Promise.all([
-    loadAlertsInWindow(from, to),
-    loadTransactionsInWindow(from, to),
+    loadAlertsInWindow(from, to, tenant.id),
+    loadTransactionsInWindow(from, to, tenant.id),
   ]);
   const txTotal = tx.total;
   const timeline = buildTimeline(from, to, alerts, tx.perDay);

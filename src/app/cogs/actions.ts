@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getCurrentTenant } from "@/lib/tenant";
 
 /**
  * Manual daily-COGS submission. Middleware guarantees the user is logged in
@@ -16,6 +17,7 @@ export async function submitCogsAction(formData: FormData) {
     data: { user },
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/cogs");
+  const tenant = await getCurrentTenant(auth);
 
   const storeId = String(formData.get("store") ?? "").toUpperCase();
   const date = String(formData.get("date") ?? "");
@@ -40,6 +42,7 @@ export async function submitCogsAction(formData: FormData) {
     .select(
       "revenue, fees, ad_spend, refunds, shipping_cost, order_count",
     )
+    .eq("tenant_id", tenant.id)
     .eq("store_id", storeId)
     .eq("date", date)
     .maybeSingle();
@@ -58,6 +61,7 @@ export async function submitCogsAction(formData: FormData) {
 
   const { error: upErr } = await sb.from("daily_pnl").upsert(
     {
+      tenant_id: tenant.id,
       store_id: storeId,
       date,
       revenue: round2(revenue),
@@ -77,6 +81,7 @@ export async function submitCogsAction(formData: FormData) {
   if (upErr) redirect("/cogs?err=db");
 
   const { error: logErr } = await sb.from("cogs_entries").insert({
+    tenant_id: tenant.id,
     store_id: storeId,
     date,
     cogs: round2(cogs),
@@ -106,12 +111,14 @@ async function applyCogsToDailyPnl(
   date: string,
   cogs: number,
   now: string,
+  tenantId: string,
 ): Promise<"ok" | "db"> {
   const { data: existing, error: selErr } = await sb
     .from("daily_pnl")
     .select(
       "revenue, fees, ad_spend, refunds, shipping_cost, order_count",
     )
+    .eq("tenant_id", tenantId)
     .eq("store_id", storeId)
     .eq("date", date)
     .maybeSingle();
@@ -130,6 +137,7 @@ async function applyCogsToDailyPnl(
 
   const { error: upErr } = await sb.from("daily_pnl").upsert(
     {
+      tenant_id: tenantId,
       store_id: storeId,
       date,
       revenue: round2(revenue),
@@ -161,6 +169,7 @@ export async function updateCogsEntryAction(formData: FormData) {
     data: { user },
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/cogs");
+  const tenant = await getCurrentTenant(auth);
 
   const id = String(formData.get("id") ?? "");
   const storeId = String(formData.get("store") ?? "").toUpperCase();
@@ -184,6 +193,7 @@ export async function updateCogsEntryAction(formData: FormData) {
   const { data: before, error: readErr } = await sb
     .from("cogs_entries")
     .select("store_id, date")
+    .eq("tenant_id", tenant.id)
     .eq("id", id)
     .maybeSingle();
   if (readErr || !before) redirect("/cogs?err=notfound");
@@ -191,11 +201,12 @@ export async function updateCogsEntryAction(formData: FormData) {
   const { error: updErr } = await sb
     .from("cogs_entries")
     .update({ store_id: storeId, date, cogs: round2(cogs) })
+    .eq("tenant_id", tenant.id)
     .eq("id", id);
   if (updErr) redirect("/cogs?err=db");
 
   // Apply new value to the new (store, date).
-  if ((await applyCogsToDailyPnl(sb, storeId, date, cogs, now)) !== "ok") {
+  if ((await applyCogsToDailyPnl(sb, storeId, date, cogs, now, tenant.id)) !== "ok") {
     redirect("/cogs?err=db");
   }
 
@@ -207,12 +218,13 @@ export async function updateCogsEntryAction(formData: FormData) {
     const { data: remaining } = await sb
       .from("cogs_entries")
       .select("cogs")
+      .eq("tenant_id", tenant.id)
       .eq("store_id", before.store_id)
       .eq("date", before.date)
       .order("submitted_at", { ascending: false })
       .limit(1);
     const restoreCogs = Number(remaining?.[0]?.cogs ?? 0);
-    if ((await applyCogsToDailyPnl(sb, before.store_id, before.date, restoreCogs, now)) !== "ok") {
+    if ((await applyCogsToDailyPnl(sb, before.store_id, before.date, restoreCogs, now, tenant.id)) !== "ok") {
       redirect("/cogs?err=db");
     }
   }
@@ -234,6 +246,7 @@ export async function deleteCogsEntryAction(formData: FormData) {
     data: { user },
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/cogs");
+  const tenant = await getCurrentTenant(auth);
 
   const id = String(formData.get("id") ?? "");
   if (!id) redirect("/cogs?err=input");
@@ -244,6 +257,7 @@ export async function deleteCogsEntryAction(formData: FormData) {
   const { data: entry, error: readErr } = await sb
     .from("cogs_entries")
     .select("store_id, date")
+    .eq("tenant_id", tenant.id)
     .eq("id", id)
     .maybeSingle();
   if (readErr || !entry) redirect("/cogs?err=notfound");
@@ -251,18 +265,20 @@ export async function deleteCogsEntryAction(formData: FormData) {
   const { error: delErr } = await sb
     .from("cogs_entries")
     .delete()
+    .eq("tenant_id", tenant.id)
     .eq("id", id);
   if (delErr) redirect("/cogs?err=db");
 
   const { data: remaining } = await sb
     .from("cogs_entries")
     .select("cogs")
+    .eq("tenant_id", tenant.id)
     .eq("store_id", entry.store_id)
     .eq("date", entry.date)
     .order("submitted_at", { ascending: false })
     .limit(1);
   const restoreCogs = Number(remaining?.[0]?.cogs ?? 0);
-  if ((await applyCogsToDailyPnl(sb, entry.store_id, entry.date, restoreCogs, now)) !== "ok") {
+  if ((await applyCogsToDailyPnl(sb, entry.store_id, entry.date, restoreCogs, now, tenant.id)) !== "ok") {
     redirect("/cogs?err=db");
   }
 

@@ -24,11 +24,12 @@ function normalizeDescriptor(s: string): string {
 
 type DescriptorEntry = { storeId: string; needle: string };
 
-async function loadDescriptorMap(): Promise<DescriptorEntry[]> {
+async function loadDescriptorMap(tenantId: string): Promise<DescriptorEntry[]> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("stores")
     .select("id, chargeblast_descriptor")
+    .eq("tenant_id", tenantId)
     .not("chargeblast_descriptor", "is", null);
   if (error) throw new Error(`loadDescriptorMap: ${error.message}`);
   const out: DescriptorEntry[] = [];
@@ -54,8 +55,11 @@ function matchDescriptor(
   return null;
 }
 
-export async function syncAlerts(filters: AlertFilters = {}): Promise<SyncResult> {
-  const descriptorEntries = await loadDescriptorMap();
+export async function syncAlerts(
+  tenantId: string,
+  filters: AlertFilters = {},
+): Promise<SyncResult> {
+  const descriptorEntries = await loadDescriptorMap(tenantId);
   const sb = supabaseAdmin();
 
   let seen = 0;
@@ -88,6 +92,7 @@ export async function syncAlerts(filters: AlertFilters = {}): Promise<SyncResult
 
     batch.push({
       id: a.id,
+      tenant_id: tenantId,
       store_id: storeId,
       merchant_descriptor: a.merchant_descriptor,
       card_brand: a.card_brand,

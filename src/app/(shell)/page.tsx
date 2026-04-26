@@ -1,5 +1,6 @@
 import { loadBlendedDashboardData } from "@/lib/pnl/queries";
 import { loadLatestPortfolioSnapshot } from "@/lib/phx/queries";
+import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { RevenueChart } from "@/components/dashboard/RevenueChart";
@@ -60,14 +61,18 @@ export default async function TotalPnlDashboardPage({
   const hasCustom = Boolean(customFrom && customTo);
   const range = RANGES.find((r) => r.id === params.range) ?? RANGES[1];
 
+  const tenant = await requireTenant();
+
   const [data, tablePool, phx] = await Promise.all([
     loadBlendedDashboardData(
+      tenant.id,
       hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
     ),
     // Table has its own range control — always load 90 days as the pool
     // and let the client filter.
-    loadBlendedDashboardData({ days: 90 }),
+    loadBlendedDashboardData(tenant.id, { days: 90 }),
     loadLatestPortfolioSnapshot(
+      tenant.id,
       hasCustom ? { from: customFrom!, to: customTo! } : undefined,
     ),
   ]);

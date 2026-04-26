@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getCurrentTenant } from "@/lib/tenant";
 
 export async function submitAdSpendAction(formData: FormData) {
   const auth = await createSupabaseServerClient();
@@ -11,6 +12,7 @@ export async function submitAdSpendAction(formData: FormData) {
     data: { user },
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/ads");
+  const tenant = await getCurrentTenant(auth);
 
   const storeId = String(formData.get("store") ?? "").toUpperCase();
   const date = String(formData.get("date") ?? "");
@@ -33,6 +35,7 @@ export async function submitAdSpendAction(formData: FormData) {
   // consistent with the CSV-imported historical data.
   const { error: adErr } = await sb.from("daily_ad_spend").upsert(
     {
+      tenant_id: tenant.id,
       store_id: storeId,
       date,
       platform: "facebook",
@@ -48,6 +51,7 @@ export async function submitAdSpendAction(formData: FormData) {
   const { data: allSpendRows, error: sumErr } = await sb
     .from("daily_ad_spend")
     .select("spend")
+    .eq("tenant_id", tenant.id)
     .eq("store_id", storeId)
     .eq("date", date);
   if (sumErr) redirect("/ads?err=db");
@@ -61,6 +65,7 @@ export async function submitAdSpendAction(formData: FormData) {
     .select(
       "revenue, cogs, fees, refunds, shipping_cost, gross_profit, net_profit, margin_pct, order_count",
     )
+    .eq("tenant_id", tenant.id)
     .eq("store_id", storeId)
     .eq("date", date)
     .maybeSingle();
@@ -76,6 +81,7 @@ export async function submitAdSpendAction(formData: FormData) {
   const marginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
   const pnlRow = {
+    tenant_id: tenant.id,
     store_id: storeId,
     date,
     revenue,
@@ -98,6 +104,7 @@ export async function submitAdSpendAction(formData: FormData) {
 
   // 3. Append to audit log with the Supabase user's email.
   const { error: logErr } = await sb.from("ad_spend_entries").insert({
+    tenant_id: tenant.id,
     store_id: storeId,
     date,
     amount: roundedAmount,
@@ -126,12 +133,14 @@ async function recomputeAdSpendFor(
   date: string,
   platform: string,
   now: string,
+  tenantId: string,
 ): Promise<"ok" | "db"> {
   // Use the latest remaining entry for this (store, date, platform) as the
   // canonical spend. If none remain, set daily_ad_spend to 0.
   const { data: latest } = await sb
     .from("ad_spend_entries")
     .select("amount")
+    .eq("tenant_id", tenantId)
     .eq("store_id", storeId)
     .eq("date", date)
     .order("submitted_at", { ascending: false })
@@ -140,6 +149,7 @@ async function recomputeAdSpendFor(
 
   const { error: upErr } = await sb.from("daily_ad_spend").upsert(
     {
+      tenant_id: tenantId,
       store_id: storeId,
       date,
       platform,
@@ -155,6 +165,7 @@ async function recomputeAdSpendFor(
   const { data: all } = await sb
     .from("daily_ad_spend")
     .select("spend")
+    .eq("tenant_id", tenantId)
     .eq("store_id", storeId)
     .eq("date", date);
   const totalSpend = round2(
@@ -166,6 +177,7 @@ async function recomputeAdSpendFor(
     .select(
       "revenue, cogs, fees, refunds, shipping_cost, order_count",
     )
+    .eq("tenant_id", tenantId)
     .eq("store_id", storeId)
     .eq("date", date)
     .maybeSingle();
@@ -180,6 +192,7 @@ async function recomputeAdSpendFor(
 
   const { error: pnlErr } = await sb.from("daily_pnl").upsert(
     {
+      tenant_id: tenantId,
       store_id: storeId,
       date,
       revenue: round2(revenue),
@@ -205,6 +218,7 @@ export async function updateAdSpendEntryAction(formData: FormData) {
     data: { user },
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/ads");
+  const tenant = await getCurrentTenant(auth);
 
   const id = String(formData.get("id") ?? "");
   const storeId = String(formData.get("store") ?? "").toUpperCase();
@@ -227,6 +241,7 @@ export async function updateAdSpendEntryAction(formData: FormData) {
   const { data: before, error: readErr } = await sb
     .from("ad_spend_entries")
     .select("store_id, date")
+    .eq("tenant_id", tenant.id)
     .eq("id", id)
     .maybeSingle();
   if (readErr || !before) redirect("/ads?err=notfound");
@@ -234,18 +249,19 @@ export async function updateAdSpendEntryAction(formData: FormData) {
   const { error: updErr } = await sb
     .from("ad_spend_entries")
     .update({ store_id: storeId, date, amount: round2(amount) })
+    .eq("tenant_id", tenant.id)
     .eq("id", id);
   if (updErr) redirect("/ads?err=db");
 
   // Recompute NEW (store, date) cell.
-  if ((await recomputeAdSpendFor(sb, storeId, date, "facebook", now)) !== "ok") {
+  if ((await recomputeAdSpendFor(sb, storeId, date, "facebook", now, tenant.id)) !== "ok") {
     redirect("/ads?err=db");
   }
 
   // If moved, recompute OLD cell too.
   if (before.store_id !== storeId || before.date !== date) {
     if (
-      (await recomputeAdSpendFor(sb, before.store_id, before.date, "facebook", now)) !==
+      (await recomputeAdSpendFor(sb, before.store_id, before.date, "facebook", now, tenant.id)) !==
       "ok"
     ) {
       redirect("/ads?err=db");
@@ -264,6 +280,7 @@ export async function deleteAdSpendEntryAction(formData: FormData) {
     data: { user },
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/ads");
+  const tenant = await getCurrentTenant(auth);
 
   const id = String(formData.get("id") ?? "");
   if (!id) redirect("/ads?err=input");
@@ -274,6 +291,7 @@ export async function deleteAdSpendEntryAction(formData: FormData) {
   const { data: entry, error: readErr } = await sb
     .from("ad_spend_entries")
     .select("store_id, date")
+    .eq("tenant_id", tenant.id)
     .eq("id", id)
     .maybeSingle();
   if (readErr || !entry) redirect("/ads?err=notfound");
@@ -281,10 +299,11 @@ export async function deleteAdSpendEntryAction(formData: FormData) {
   const { error: delErr } = await sb
     .from("ad_spend_entries")
     .delete()
+    .eq("tenant_id", tenant.id)
     .eq("id", id);
   if (delErr) redirect("/ads?err=db");
 
-  if ((await recomputeAdSpendFor(sb, entry.store_id, entry.date, "facebook", now)) !== "ok") {
+  if ((await recomputeAdSpendFor(sb, entry.store_id, entry.date, "facebook", now, tenant.id)) !== "ok") {
     redirect("/ads?err=db");
   }
 

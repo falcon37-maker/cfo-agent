@@ -197,6 +197,8 @@ const COUNT_KEY: Record<
 const PAGE_SIZE = 10;
 
 export type BackfillOptions = {
+  /** Tenant whose phx_summary_snapshots rows are written / overwritten. */
+  tenantId: string;
   from: string; // YYYY-MM-DD inclusive
   to: string; // YYYY-MM-DD inclusive
   startStatus?: SubscriberStatus;
@@ -273,14 +275,18 @@ export async function backfillRevenueForRange(
   const deadlineHit = () => Date.now() - startedAt >= deadlineMs;
 
   if (opts.reset) {
-    await deleteSnapshotsTouchingRange(opts.from, opts.to);
+    await deleteSnapshotsTouchingRange(opts.from, opts.to, opts.tenantId);
   }
 
   // Dedupe set persisted across chunks. A customer who appears in multiple
   // status lists (e.g., Active for one store + Canceled for another) would
   // otherwise have their tx-history fetched + bucketed twice, doubling
   // subscription revenue.
-  const seenCustomers = await loadSeenCustomers(opts.from, opts.to);
+  const seenCustomers = await loadSeenCustomers(
+    opts.from,
+    opts.to,
+    opts.tenantId,
+  );
   const newlySeen = new Set<number>();
 
   let customersSeen = 0;
@@ -435,16 +441,22 @@ export async function backfillRevenueForRange(
 
   let persisted = false;
   if (opts.persist !== false && customersSeen > 0) {
-    persisted = await mergePerDaySnapshots(perDayPerStore, {
-      customersSeen,
-      customersWithTx,
-    });
+    persisted = await mergePerDaySnapshots(
+      perDayPerStore,
+      { customersSeen, customersWithTx },
+      opts.tenantId,
+    );
     // Update dedupe marker AFTER successful per-day persist. If both succeed,
     // resuming after a crash either reprocesses an unmarked customer (safe —
     // their day-row already has their values, but we'd add again — small
     // risk window) OR sees them as already-seen and skips.
     if (newlySeen.size > 0) {
-      await persistSeenCustomers(opts.from, opts.to, seenCustomers);
+      await persistSeenCustomers(
+        opts.from,
+        opts.to,
+        seenCustomers,
+        opts.tenantId,
+      );
     }
   }
 
@@ -478,12 +490,14 @@ export async function backfillRevenueForRange(
 async function deleteSnapshotsTouchingRange(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<void> {
   const sb = supabaseAdmin();
   const ids: Array<StoreId | "PORTFOLIO"> = [...STORE_IDS, "PORTFOLIO"];
   const { error } = await sb
     .from("phx_summary_snapshots")
     .delete()
+    .eq("tenant_id", tenantId)
     .in("store_id", ids)
     .lte("range_from", to)
     .gte("range_to", from);
@@ -493,6 +507,7 @@ async function deleteSnapshotsTouchingRange(
   await sb
     .from("phx_summary_snapshots")
     .delete()
+    .eq("tenant_id", tenantId)
     .eq("store_id", BACKFILL_DEDUPE_STORE_ID)
     .eq("range_from", from)
     .eq("range_to", to);
@@ -508,11 +523,13 @@ const BACKFILL_DEDUPE_STORE_ID = "__BACKFILL_DEDUPE__";
 async function loadSeenCustomers(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<Set<number>> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("phx_summary_snapshots")
     .select("raw_json")
+    .eq("tenant_id", tenantId)
     .eq("store_id", BACKFILL_DEDUPE_STORE_ID)
     .eq("range_from", from)
     .eq("range_to", to)
@@ -529,12 +546,14 @@ async function persistSeenCustomers(
   from: string,
   to: string,
   ids: Set<number>,
+  tenantId: string,
 ): Promise<void> {
   if (ids.size === 0) return;
   const sb = supabaseAdmin();
   const now = new Date();
   const { error } = await sb.from("phx_summary_snapshots").upsert(
     {
+      tenant_id: tenantId,
       store_id: BACKFILL_DEDUPE_STORE_ID,
       range_from: from,
       range_to: to,
@@ -568,6 +587,7 @@ type SnapshotRow = {
 async function mergePerDaySnapshots(
   perDayPerStore: PerDayPerStore,
   meta: { customersSeen: number; customersWithTx: number },
+  tenantId: string,
 ): Promise<boolean> {
   if (perDayPerStore.size === 0) return false;
 
@@ -600,6 +620,7 @@ async function mergePerDaySnapshots(
     .select(
       "store_id, range_from, range_to, revenue_direct, revenue_initial, revenue_recurring, revenue_salvage, revenue_upsell, revenue_total, raw_json",
     )
+    .eq("tenant_id", tenantId)
     .in("store_id", STORE_IDS)
     .gte("range_from", minDate)
     .lte("range_to", maxDate);
@@ -614,8 +635,8 @@ async function mergePerDaySnapshots(
   const scrape_date = now.toISOString().slice(0, 10);
   const scraped_at = now.toISOString();
 
-  const rows = keys.map(({ store, date }) =>
-    mergeDayRow(
+  const rows = keys.map(({ store, date }) => ({
+    ...mergeDayRow(
       byKey.get(`${store}|${date}`),
       store,
       date,
@@ -624,7 +645,8 @@ async function mergePerDaySnapshots(
       perDayPerStore.get(date)![store],
       meta,
     ),
-  );
+    tenant_id: tenantId,
+  }));
 
   const { error } = await sb
     .from("phx_summary_snapshots")

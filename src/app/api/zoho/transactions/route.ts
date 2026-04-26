@@ -5,11 +5,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { zohoFetch } from "@/lib/zoho/client";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const tenant = await requireTenant();
     const sp = new URL(req.url).searchParams;
     const account_id = sp.get("account_id");
     const date_start = sp.get("date_start") ?? undefined;
@@ -24,7 +26,7 @@ export async function GET(req: NextRequest) {
     const path = account_id
       ? `/bankaccounts/${encodeURIComponent(account_id)}/transactions`
       : "/banktransactions";
-    const data = await zohoFetch<unknown>(path, { query });
+    const data = await zohoFetch<unknown>(tenant.id, path, { query });
     return NextResponse.json(data);
   } catch (e) {
     return NextResponse.json(

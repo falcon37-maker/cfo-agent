@@ -4,13 +4,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { zohoFetch } from "@/lib/zoho/client";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const tenant = await requireTenant();
     const params = Object.fromEntries(new URL(req.url).searchParams);
-    const data = await zohoFetch<unknown>("/expenses", { query: params });
+    const data = await zohoFetch<unknown>(tenant.id, "/expenses", {
+      query: params,
+    });
     return NextResponse.json(data);
   } catch (e) {
     return NextResponse.json(
@@ -32,6 +36,7 @@ type CreateBody = {
 
 export async function POST(req: NextRequest) {
   try {
+    const tenant = await requireTenant();
     const body = (await req.json()) as CreateBody;
     if (!body.account_id || !body.date || body.amount == null) {
       return NextResponse.json(
@@ -39,7 +44,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const data = await zohoFetch<unknown>("/expenses", {
+    const data = await zohoFetch<unknown>(tenant.id, "/expenses", {
       method: "POST",
       body,
     });

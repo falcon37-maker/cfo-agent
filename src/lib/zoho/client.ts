@@ -18,6 +18,7 @@ export type ZohoFetchOptions = {
 };
 
 export async function zohoFetch<T>(
+  tenantId: string,
   path: string,
   opts: ZohoFetchOptions = {},
 ): Promise<T> {
@@ -36,7 +37,7 @@ export async function zohoFetch<T>(
   }
 
   // First attempt: use the cached (or freshly-refreshed) access token.
-  let accessToken = await getAccessToken();
+  let accessToken = await getAccessToken(tenantId);
   let res = await fetch(url, {
     ...init,
     headers: { ...headers, Authorization: `Zoho-oauthtoken ${accessToken}` },
@@ -45,9 +46,9 @@ export async function zohoFetch<T>(
   // Zoho sometimes returns 401 if the token was invalidated server-side
   // before our TTL ran out. One retry after a refresh.
   if (res.status === 401) {
-    const creds = await loadCredentials();
+    const creds = await loadCredentials(tenantId);
     if (creds) {
-      accessToken = await refreshAccessToken(creds.refresh_token);
+      accessToken = await refreshAccessToken(tenantId, creds.refresh_token);
       res = await fetch(url, {
         ...init,
         headers: { ...headers, Authorization: `Zoho-oauthtoken ${accessToken}` },

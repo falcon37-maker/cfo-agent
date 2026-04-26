@@ -25,6 +25,7 @@ import {
   SUBSCRIBER_STATUSES,
   type SubscriberStatus,
 } from "@/lib/solvpath/sync";
+import { listActiveTenants } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -152,8 +153,30 @@ async function handle(request: NextRequest) {
           : undefined;
       const reset = sp.get("reset") === "1";
 
+      // CRON_SECRET-authed — no user session. Resolve via ?tenantId= or
+      // single-active-tenant fallback.
+      const explicitTenantId = sp.get("tenantId");
+      let tenantId = explicitTenantId ?? null;
+      if (!tenantId) {
+        const tenants = await listActiveTenants();
+        if (tenants.length === 1) tenantId = tenants[0].id;
+        else
+          return Response.json(
+            {
+              error:
+                "Multiple active tenants — pass ?tenantId=<uuid> to disambiguate.",
+              tenants: tenants.map((t) => ({
+                id: t.id,
+                name: t.display_name,
+              })),
+            },
+            { status: 400 },
+          );
+      }
+
       const started = Date.now();
       const result = await backfillRevenueForRange({
+        tenantId,
         from,
         to,
         startStatus,
@@ -166,6 +189,7 @@ async function handle(request: NextRequest) {
       return Response.json({
         ok: true,
         action,
+        tenantId,
         from,
         to,
         elapsedMs: Date.now() - started,

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { syncDailyOrders } from "@/lib/shopify/sync";
 import { listConfiguredStores } from "@/lib/shopify/stores";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +25,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const date = dateParam ?? (await todayInStoreTz(storeCode));
-    const result = await syncDailyOrders(storeCode, date);
+    const tenant = await requireTenant();
+    const date = dateParam ?? (await todayInStoreTz(storeCode, tenant.id));
+    const result = await syncDailyOrders(storeCode, date, tenant.id);
     return Response.json({ ok: true, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -33,11 +35,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function todayInStoreTz(storeCode: string): Promise<string> {
+async function todayInStoreTz(
+  storeCode: string,
+  tenantId: string,
+): Promise<string> {
   const sb = supabaseAdmin();
   const { data } = await sb
     .from("stores")
     .select("timezone")
+    .eq("tenant_id", tenantId)
     .eq("id", storeCode.toUpperCase())
     .maybeSingle();
   const tz = data?.timezone ?? "UTC";

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { loadPnlLedger } from "@/lib/pnl/queries";
+import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
@@ -62,9 +63,11 @@ export default async function PnlPage({
   const hasCustom = Boolean(customFrom && customTo);
   const range = resolveRange(params.range);
 
+  const tenant = await requireTenant();
   const ledger = await loadPnlLedger(
     hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
     selected,
+    tenant.id,
   );
   const { rows, totals, stores } = ledger;
 

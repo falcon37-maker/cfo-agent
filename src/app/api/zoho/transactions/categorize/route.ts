@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { zohoFetch } from "@/lib/zoho/client";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
+    const tenant = await requireTenant();
     const body = (await req.json()) as Body;
     if (!body.transaction_id || !body.account_id) {
       return NextResponse.json(
@@ -34,6 +36,7 @@ export async function POST(req: NextRequest) {
     if (body.date) payload.date = body.date;
 
     const data = await zohoFetch<unknown>(
+      tenant.id,
       `/banktransactions/uncategorized/${encodeURIComponent(body.transaction_id)}/categorize`,
       { method: "POST", body: payload },
     );

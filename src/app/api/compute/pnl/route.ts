@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { computeDailyPnl } from "@/lib/pnl/compute";
+import { requireTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const row = await computeDailyPnl(storeCode, date);
+    const tenant = await requireTenant();
+    const row = await computeDailyPnl(storeCode, date, tenant.id);
     return Response.json({ ok: true, pnl: row });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

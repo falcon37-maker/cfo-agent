@@ -28,6 +28,7 @@ export type DailyPnl = {
 export async function computeDailyPnl(
   storeCode: string,
   date: string,
+  tenantId: string,
 ): Promise<DailyPnl | null> {
   const sb = supabaseAdmin();
   const code = storeCode.toUpperCase();
@@ -35,6 +36,7 @@ export async function computeDailyPnl(
   const { data: store, error: storeErr } = await sb
     .from("stores")
     .select("default_cogs_per_order, processing_fee_pct")
+    .eq("tenant_id", tenantId)
     .eq("id", code)
     .maybeSingle();
   if (storeErr) throw new Error(`stores lookup failed: ${storeErr.message}`);
@@ -43,6 +45,7 @@ export async function computeDailyPnl(
   const { data: orders, error: ordErr } = await sb
     .from("daily_orders")
     .select("order_count, gross_sales, refunds")
+    .eq("tenant_id", tenantId)
     .eq("store_id", code)
     .eq("date", date)
     .maybeSingle();
@@ -52,6 +55,7 @@ export async function computeDailyPnl(
   const { data: adRows, error: adErr } = await sb
     .from("daily_ad_spend")
     .select("spend")
+    .eq("tenant_id", tenantId)
     .eq("store_id", code)
     .eq("date", date);
   if (adErr) throw new Error(`daily_ad_spend lookup failed: ${adErr.message}`);
@@ -88,6 +92,7 @@ export async function computeDailyPnl(
     .upsert(
       {
         ...row,
+        tenant_id: tenantId,
         order_count: Number(orders.order_count) ?? 0,
         computed_at: new Date().toISOString(),
       },

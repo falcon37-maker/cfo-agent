@@ -18,11 +18,14 @@ export type ZohoCredentials = {
   expires_at: string; // ISO
 };
 
-export async function loadCredentials(): Promise<ZohoCredentials | null> {
+export async function loadCredentials(
+  tenantId: string,
+): Promise<ZohoCredentials | null> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("zoho_credentials")
     .select("org_id, access_token, refresh_token, expires_at")
+    .eq("tenant_id", tenantId)
     .eq("org_id", ORG_ID)
     .maybeSingle();
   if (error) throw new Error(`loadCredentials: ${error.message}`);
@@ -30,6 +33,7 @@ export async function loadCredentials(): Promise<ZohoCredentials | null> {
 }
 
 export async function saveCredentials(
+  tenantId: string,
   access_token: string,
   refresh_token: string,
   expires_in_seconds: number,
@@ -40,6 +44,7 @@ export async function saveCredentials(
     .from("zoho_credentials")
     .upsert(
       {
+        tenant_id: tenantId,
         org_id: ORG_ID,
         access_token,
         refresh_token,
@@ -53,6 +58,7 @@ export async function saveCredentials(
 
 /** Update only the access_token (keeps refresh_token untouched). */
 async function patchAccessToken(
+  tenantId: string,
   access_token: string,
   expires_in_seconds: number,
 ): Promise<void> {
@@ -61,15 +67,17 @@ async function patchAccessToken(
   const { error } = await sb
     .from("zoho_credentials")
     .update({ access_token, expires_at, updated_at: new Date().toISOString() })
+    .eq("tenant_id", tenantId)
     .eq("org_id", ORG_ID);
   if (error) throw new Error(`patchAccessToken: ${error.message}`);
 }
 
-export async function deleteCredentials(): Promise<void> {
+export async function deleteCredentials(tenantId: string): Promise<void> {
   const sb = supabaseAdmin();
   const { error } = await sb
     .from("zoho_credentials")
     .delete()
+    .eq("tenant_id", tenantId)
     .eq("org_id", ORG_ID);
   if (error) throw new Error(`deleteCredentials: ${error.message}`);
 }
@@ -81,16 +89,19 @@ function isExpired(creds: ZohoCredentials): boolean {
 /**
  * Returns a valid access_token — refreshes if expired. Throws if not connected.
  */
-export async function getAccessToken(): Promise<string> {
-  const creds = await loadCredentials();
+export async function getAccessToken(tenantId: string): Promise<string> {
+  const creds = await loadCredentials(tenantId);
   if (!creds) {
     throw new Error("Zoho not connected. Start OAuth at /api/auth/zoho.");
   }
   if (!isExpired(creds)) return creds.access_token;
-  return refreshAccessToken(creds.refresh_token);
+  return refreshAccessToken(tenantId, creds.refresh_token);
 }
 
-export async function refreshAccessToken(refresh_token: string): Promise<string> {
+export async function refreshAccessToken(
+  tenantId: string,
+  refresh_token: string,
+): Promise<string> {
   const body = new URLSearchParams({
     refresh_token,
     client_id: CLIENT_ID,
@@ -114,7 +125,7 @@ export async function refreshAccessToken(refresh_token: string): Promise<string>
   if (json.error || !json.access_token) {
     throw new Error(`Zoho token refresh error: ${json.error ?? "no access_token"}`);
   }
-  await patchAccessToken(json.access_token, json.expires_in ?? 3600);
+  await patchAccessToken(tenantId, json.access_token, json.expires_in ?? 3600);
   return json.access_token;
 }
 

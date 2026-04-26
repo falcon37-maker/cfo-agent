@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { backfillLastNDays, backfillRange } from "@/lib/pnl/backfill";
+import { requireTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,11 +20,16 @@ export async function POST(request: NextRequest) {
     const from = params.get("from");
     const to = params.get("to");
 
+    const tenant = await requireTenant();
     const started = Date.now();
     const results =
       from && to
-        ? await backfillRange(storeCode, from, to)
-        : await backfillLastNDays(storeCode, daysParam ? Number(daysParam) : 90);
+        ? await backfillRange(storeCode, from, to, tenant.id)
+        : await backfillLastNDays(
+            storeCode,
+            daysParam ? Number(daysParam) : 90,
+            tenant.id,
+          );
 
     const totalOrders = results.reduce((s, r) => s + r.pull.orderCount, 0);
     const totalRevenue = results.reduce((s, r) => s + r.pull.grossSales, 0);

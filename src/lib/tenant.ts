@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type Tenant = {
   id: string;
@@ -20,6 +21,15 @@ export type Tenant = {
   created_at: string;
   updated_at: string;
 };
+
+/** Resolve the current tenant for the in-flight request — opens an SSR
+ *  Supabase client off the cookie store, reads auth.getUser(), and looks
+ *  up the matching tenants row. Use this from Server Components, Server
+ *  Actions, and Route Handlers that run in a request context. */
+export async function requireTenant(): Promise<Tenant> {
+  const ssr = await createSupabaseServerClient();
+  return getCurrentTenant(ssr);
+}
 
 /** Resolve the current tenant from a SSR-bound Supabase client (which has
  *  the user's session cookie). Throws if there's no authenticated user or

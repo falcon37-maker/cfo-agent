@@ -16,13 +16,14 @@ export async function backfillRange(
   storeCode: string,
   startDate: string,
   endDate: string,
+  tenantId: string,
 ): Promise<BackfillDayResult[]> {
   const dates = enumerateDates(startDate, endDate);
   const results: BackfillDayResult[] = [];
 
   for (const date of dates) {
-    const pull = await syncDailyOrders(storeCode, date);
-    const pnl = await computeDailyPnl(storeCode, date);
+    const pull = await syncDailyOrders(storeCode, date, tenantId);
+    const pnl = await computeDailyPnl(storeCode, date, tenantId);
     results.push({ date, pull, netProfit: pnl?.net_profit ?? 0 });
   }
 
@@ -33,18 +34,20 @@ export async function backfillRange(
 export async function backfillLastNDays(
   storeCode: string,
   days: number,
+  tenantId: string,
 ): Promise<BackfillDayResult[]> {
   const sb = supabaseAdmin();
   const { data: store } = await sb
     .from("stores")
     .select("timezone")
+    .eq("tenant_id", tenantId)
     .eq("id", storeCode.toUpperCase())
     .maybeSingle();
   const tz = store?.timezone ?? "UTC";
 
   const today = ymdInTz(new Date(), tz);
   const start = addDays(today, -(days - 1));
-  return backfillRange(storeCode, start, today);
+  return backfillRange(storeCode, start, today, tenantId);
 }
 
 function enumerateDates(start: string, end: string): string[] {

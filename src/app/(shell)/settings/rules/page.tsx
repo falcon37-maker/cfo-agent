@@ -1,11 +1,13 @@
 import { loadStores } from "@/lib/pnl/queries";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 // All edits are no-op in Phase A — these read from (and only from) stores.processing_fee_pct
 // for the fee rate; other thresholds are placeholder values until a `rules` table exists.
 export default async function RulesSettingsPage() {
-  const stores = await loadStores();
+  const tenant = await requireTenant();
+  const stores = await loadStores(tenant.id);
   // Surface the first store's fee rate — in practice they should all be the same.
   const feePct = stores[0]?.processing_fee_pct ?? 0.1;
 

@@ -1,11 +1,13 @@
 import { Plus } from "lucide-react";
 import { loadDashboardData } from "@/lib/pnl/queries";
 import { fmtMoney } from "@/lib/format";
+import { requireTenant } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export default async function StoresSettingsPage() {
-  const data = await loadDashboardData();
+  const tenant = await requireTenant();
+  const data = await loadDashboardData(tenant.id);
   const { stores, storeMixToday } = data;
   const totalToday = storeMixToday.reduce((s, p) => s + p.revenue, 0);
 

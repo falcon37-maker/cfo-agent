@@ -6,6 +6,7 @@ import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { loadStores } from "@/lib/pnl/queries";
 import { loadPhxDailyRows } from "@/lib/phx/queries";
+import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
@@ -74,11 +75,13 @@ async function loadPnlInRange(
   from: string,
   to: string,
   storeIds: string[],
+  tenantId: string,
 ): Promise<PnlRow[]> {
   const sb = supabaseAdmin();
   let q = sb
     .from("daily_pnl")
     .select("store_id, date, revenue, cogs, fees, refunds, ad_spend, order_count")
+    .eq("tenant_id", tenantId)
     .gte("date", from)
     .lte("date", to);
   if (storeIds.length > 0) q = q.in("store_id", storeIds);
@@ -90,11 +93,13 @@ async function loadPnlInRange(
 async function loadAlertsInRange(
   from: string,
   to: string,
+  tenantId: string,
 ): Promise<Array<{ amount: number | null; store_id: string | null }>> {
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("chargeblast_alerts")
     .select("amount, store_id")
+    .eq("tenant_id", tenantId)
     .gte("chargeblast_created_at", `${from}T00:00:00Z`)
     .lte("chargeblast_created_at", `${to}T23:59:59Z`);
   if (error) return [];
@@ -127,8 +132,10 @@ export default async function FinancePage({
     ? `${fmtDate(from)} → ${fmtDate(to)}`
     : `Last ${range.days} days`;
 
+  const tenant = await requireTenant();
+
   // Resolve which stores feed each side (Shopify-direct vs PHX-source).
-  const stores = await loadStores();
+  const stores = await loadStores(tenant.id);
   const phxStores = stores
     .map((s) => s.id)
     .filter((id) => PHX_STORE_IDS.has(id));
@@ -143,17 +150,17 @@ export default async function FinancePage({
 
   // Pull range data in parallel.
   const [pnl, phxDays, alerts, monthlyPnl, monthlyPhx] = await Promise.all([
-    loadPnlInRange(from, to, selected),
-    loadPhxDailyRows(from, to, selectedPhxStores),
-    loadAlertsInRange(from, to),
+    loadPnlInRange(from, to, selected, tenant.id),
+    loadPhxDailyRows(from, to, selectedPhxStores, tenant.id),
+    loadAlertsInRange(from, to, tenant.id),
     // Monthly trend — last 12 calendar months.
     (async () => {
       const trendFrom = addDays(to, -365);
-      return loadPnlInRange(trendFrom, to, selected);
+      return loadPnlInRange(trendFrom, to, selected, tenant.id);
     })(),
     (async () => {
       const trendFrom = addDays(to, -365);
-      return loadPhxDailyRows(trendFrom, to, selectedPhxStores);
+      return loadPhxDailyRows(trendFrom, to, selectedPhxStores, tenant.id);
     })(),
   ]);
 
