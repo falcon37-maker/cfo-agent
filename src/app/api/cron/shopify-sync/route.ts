@@ -126,25 +126,42 @@ async function handle(request: NextRequest) {
     }
 
     // Chargeblast pull — last 7 days so status updates on older alerts flow in.
+    // Skip the tenant entirely when they have no stores with a Chargeblast
+    // descriptor — otherwise we'd write the global alert feed (one shared
+    // CHARGEBLAST_API_KEY across all tenants) into tenants that don't own
+    // the merchant account, polluting their data.
     if (process.env.CHARGEBLAST_API_KEY) {
-      const today = new Date().toISOString().slice(0, 10);
-      const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
-      try {
-        const r = await syncAlerts(tenant.id, {
-          start_date: weekAgo,
-          end_date: today,
-        });
+      const { count: descriptorCount } = await sb
+        .from("stores")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenant.id)
+        .not("chargeblast_descriptor", "is", null);
+      if (!descriptorCount) {
         chargeblastByTenant.push({
           tenant: tenant.display_name,
           ok: true,
-          ...r,
+          skipped: "no chargeblast_descriptor on any store",
         });
-      } catch (err) {
-        chargeblastByTenant.push({
-          tenant: tenant.display_name,
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      } else {
+        const today = new Date().toISOString().slice(0, 10);
+        const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+        try {
+          const r = await syncAlerts(tenant.id, {
+            start_date: weekAgo,
+            end_date: today,
+          });
+          chargeblastByTenant.push({
+            tenant: tenant.display_name,
+            ok: true,
+            ...r,
+          });
+        } catch (err) {
+          chargeblastByTenant.push({
+            tenant: tenant.display_name,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
   }
