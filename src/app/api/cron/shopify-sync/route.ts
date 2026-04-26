@@ -97,7 +97,7 @@ async function handle(request: NextRequest) {
       continue;
     }
     for (const store of stores ?? []) {
-      if (!hasStoreCreds(store.id)) {
+      if (!(await hasStoreCreds(store.id, tenant.id))) {
         skipped.push({ tenant: tenant.display_name, store: store.id });
         continue;
       }

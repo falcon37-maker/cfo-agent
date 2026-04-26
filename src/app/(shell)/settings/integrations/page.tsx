@@ -64,6 +64,13 @@ export default async function IntegrationsSettingsPage({
     loadCredentials(tenant.id),
     loadShopifyStores(tenant.id),
   ]);
+  // Pre-resolve credsSet for each store so the JSX can render synchronously.
+  const storeCredsSet = new Map<string, boolean>();
+  await Promise.all(
+    shopifyStores.map(async (s) => {
+      storeCredsSet.set(s.id, await hasStoreCreds(s.id, tenant.id));
+    }),
+  );
   const { ORG_ID } = zohoEnv();
   const connected = Boolean(creds);
   const expiresAt = creds ? new Date(creds.expires_at) : null;
@@ -203,7 +210,7 @@ export default async function IntegrationsSettingsPage({
             </div>
           ) : (
             shopifyStores.map((s) => {
-              const credsSet = hasStoreCreds(s.id);
+              const credsSet = storeCredsSet.get(s.id) ?? false;
               return (
                 <div className="integration-row" key={s.id}>
                   <div className="integration-logo">{s.id.slice(0, 1)}</div>

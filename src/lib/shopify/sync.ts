@@ -69,7 +69,7 @@ export async function syncDailyOrders(
   date: string,
   tenantId: string,
 ): Promise<DailyPullResult> {
-  const creds = getStoreCreds(storeCode);
+  const creds = await getStoreCreds(storeCode, tenantId);
   const sb = supabaseAdmin();
 
   const { data: storeRow } = await sb
