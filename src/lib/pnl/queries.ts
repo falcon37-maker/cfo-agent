@@ -397,10 +397,14 @@ export async function loadBlendedDashboardData(
   const isPhxStore = (row: RawPnlRow) => PHX_STORE_IDS.has(row.store_id);
   const shopifyByDateNonPhx = groupByDate(curPnl.filter((r) => !isPhxStore(r)));
   const shopifyByDateAll = groupByDate(curPnl);
+  const shopifyByDatePhx = groupByDate(curPnl.filter((r) => isPhxStore(r)));
   const shopifyByDatePriorNonPhx = groupByDate(
     priorPnl.filter((r) => !isPhxStore(r)),
   );
   const shopifyByDatePriorAll = groupByDate(priorPnl);
+  const shopifyByDatePriorPhx = groupByDate(
+    priorPnl.filter((r) => isPhxStore(r)),
+  );
 
   const emptyPhxDay: PhxDayTotals = {
     frontend: 0,
@@ -416,8 +420,18 @@ export async function loadBlendedDashboardData(
   while (cur <= to) {
     const nonPhxShop = aggregate(shopifyByDateNonPhx[cur] ?? []);
     const allShop = aggregate(shopifyByDateAll[cur] ?? []);
+    const phxShop = aggregate(shopifyByDatePhx[cur] ?? []);
     const phx = phxByDayCur.get(cur) ?? emptyPhxDay;
-    const phxContribution = phx.total * (1 - feeRate);
+    // PHX stores' real net = PHX revenue − processor fees − the Shopify-side
+    // costs they still incur (logged ad_spend / cogs / refunds / fees).
+    // Without this subtraction the dashboard double-shows costs in the row
+    // while ignoring them in net profit.
+    const phxContribution =
+      phx.total * (1 - feeRate)
+      - phxShop.ad_spend
+      - phxShop.cogs
+      - phxShop.refunds
+      - phxShop.fees;
     const nonPhxContribution = nonPhxShop.net_profit;
     daily.push({
       date: cur,
@@ -445,7 +459,14 @@ export async function loadBlendedDashboardData(
   while (curP <= priorTo) {
     const nonPhxShop = aggregate(shopifyByDatePriorNonPhx[curP] ?? []);
     const allShop = aggregate(shopifyByDatePriorAll[curP] ?? []);
+    const phxShop = aggregate(shopifyByDatePriorPhx[curP] ?? []);
     const phx = phxByDayPrior.get(curP) ?? emptyPhxDay;
+    const phxContribution =
+      phx.total * (1 - feeRate)
+      - phxShop.ad_spend
+      - phxShop.cogs
+      - phxShop.refunds
+      - phxShop.fees;
     priorDaily.push({
       date: curP,
       shopify_revenue: round2(nonPhxShop.revenue),
@@ -455,15 +476,13 @@ export async function loadBlendedDashboardData(
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phx.total),
-      phx_net_contribution: round2(phx.total * (1 - feeRate)),
+      phx_net_contribution: round2(phxContribution),
       phx_subs_billed: phx.subsBilledCount,
       phx_frontend_revenue: round2(phx.frontend),
       phx_subs_revenue: round2(phx.subs),
       phx_upsell_revenue: round2(phx.upsell),
       total_revenue: round2(nonPhxShop.revenue + phx.total),
-      total_net_profit: round2(
-        nonPhxShop.net_profit + phx.total * (1 - feeRate),
-      ),
+      total_net_profit: round2(nonPhxShop.net_profit + phxContribution),
     });
     curP = addDays(curP, 1);
   }
@@ -561,14 +580,17 @@ export type PnlLedger = {
   rows: DailyRow[]; // newest first
   totals: Totals;
   days: number;
-  storeFilter: string; // 'all' | store id
+  /** Selected store IDs. Empty array = all stores. */
+  selectedStores: string[];
 };
 
 /** Filtered/aggregated ledger for /pnl.
- *  Pass either `days` (rolling window ending today) or an explicit `{from, to}`. */
+ *  Pass either `days` (rolling window ending today) or an explicit `{from, to}`.
+ *  storeFilter may be a single id, "all", or an array of ids; an empty array
+ *  is equivalent to "all". */
 export async function loadPnlLedger(
   rangeSpec: { days: number } | { from: string; to: string },
-  storeFilter: string,
+  storeFilter: string | string[],
 ): Promise<PnlLedger> {
   const stores = await loadStores();
   const rows =
@@ -576,10 +598,11 @@ export async function loadPnlLedger(
       ? await loadPnlRowsInRange(rangeSpec.from, rangeSpec.to)
       : await loadPnlRows(rangeSpec.days);
 
+  const selected = normalizeStoreFilter(storeFilter);
   const filtered =
-    storeFilter === "all"
+    selected.length === 0
       ? rows
-      : rows.filter((r) => r.store_id === storeFilter.toUpperCase());
+      : rows.filter((r) => selected.includes(r.store_id));
 
   const byDate = groupByDate(filtered);
   const ordered = Object.keys(byDate).sort().reverse();
@@ -598,8 +621,17 @@ export async function loadPnlLedger(
     rows: ledger,
     totals,
     days,
-    storeFilter,
+    selectedStores: selected,
   };
+}
+
+function normalizeStoreFilter(f: string | string[]): string[] {
+  if (Array.isArray(f)) return f.map((s) => s.toUpperCase());
+  if (!f || f.toLowerCase() === "all") return [];
+  return f
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
 }
 
 function diffDays(from: string, to: string): number {

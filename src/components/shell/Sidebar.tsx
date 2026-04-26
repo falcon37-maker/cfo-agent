@@ -13,6 +13,7 @@ import {
   CheckSquare,
   Megaphone,
   ShieldAlert,
+  Landmark,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
 import type { Role } from "@/lib/auth/roles";
@@ -28,8 +29,9 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pnl", label: "P&L · Shopify", icon: LineChart },
-  { href: "/subscriptions", label: "Subscriptions · PHX", icon: Repeat },
+  { href: "/pnl", label: "Stores", icon: LineChart },
+  { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
+  { href: "/finance", label: "Finance", icon: Landmark },
   { href: "/chargebacks", label: "Chargebacks", icon: ShieldAlert },
   { href: "/calculator", label: "Calculator", icon: Calculator },
   { href: "/cogs", label: "Log COGS", icon: CheckSquare },

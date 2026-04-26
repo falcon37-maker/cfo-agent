@@ -32,6 +32,14 @@ function qs(params: Record<string, string>): string {
   return s ? `?${s}` : "";
 }
 
+function parseStoreList(raw: string): string[] {
+  if (!raw || raw.toLowerCase() === "all") return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function PnlPage({
@@ -45,7 +53,8 @@ export default async function PnlPage({
   }>;
 }) {
   const params = await searchParams;
-  const storeFilter = (params.store ?? "all").toLowerCase();
+  const rawStoreParam = params.store ?? "";
+  const selected = parseStoreList(rawStoreParam);
 
   // Custom `?from=&to=` overrides the preset `?range=`.
   const customFrom = DATE_RE.test(params.from ?? "") ? params.from! : undefined;
@@ -55,20 +64,41 @@ export default async function PnlPage({
 
   const ledger = await loadPnlLedger(
     hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
-    storeFilter === "all" ? "all" : storeFilter.toUpperCase(),
+    selected,
   );
   const { rows, totals, stores } = ledger;
 
-  const storeOptions: Array<{ id: string; label: string }> = [
-    { id: "all", label: "All" },
-    ...stores.map((s) => ({ id: s.id.toLowerCase(), label: s.id })),
-  ];
+  // The active set as the URL would express it (canonical comma list).
+  const activeParam =
+    selected.length === 0 ? "" : selected.slice().sort().join(",");
 
   const exportHref = `/api/export/pnl${qs(
     hasCustom
-      ? { from: customFrom!, to: customTo!, store: storeFilter }
-      : { range: range.id, store: storeFilter },
+      ? { from: customFrom!, to: customTo!, store: activeParam }
+      : { range: range.id, store: activeParam },
   )}`;
+
+  // Build the multi-select chip list. "All" toggles to empty (= all stores);
+  // each store chip toggles its presence in the comma list.
+  const allChipActive = selected.length === 0;
+  const chipHrefAll = `/pnl${qs({
+    range: hasCustom ? "" : range.id,
+    from: hasCustom ? customFrom! : "",
+    to: hasCustom ? customTo! : "",
+    // omit `store` entirely → "all"
+  })}`;
+  const buildToggleHref = (storeId: string): string => {
+    const next = new Set(selected);
+    if (next.has(storeId)) next.delete(storeId);
+    else next.add(storeId);
+    const param = Array.from(next).sort().join(",");
+    return `/pnl${qs({
+      range: hasCustom ? "" : range.id,
+      from: hasCustom ? customFrom! : "",
+      to: hasCustom ? customTo! : "",
+      store: param,
+    })}`;
+  };
 
   const subLine = hasCustom
     ? `${fmtDate(customFrom!)} → ${fmtDate(customTo!)} (${ledger.days} day${ledger.days === 1 ? "" : "s"})`
@@ -78,22 +108,16 @@ export default async function PnlPage({
     <>
       <div className="pnl-header">
         <div>
-          <h2 className="section-title">
-            P&amp;L
-            <span
-              className="phx-tag"
-              style={{
-                background: "var(--surface-3)",
-                color: "var(--muted-strong)",
-              }}
-            >
-              SHOPIFY
-            </span>
-          </h2>
+          <h2 className="section-title">Stores</h2>
           <div className="section-sub">
-            Front-end only — direct and initial-subscription orders. For
-            blended revenue (+ PHX recurring) see the Total P&amp;L dashboard.{" "}
-            {storeFilter === "all" ? "All stores" : storeFilter.toUpperCase()} · {subLine}
+            Per-store front-end P&amp;L — direct and initial-subscription
+            orders. Blended revenue (with PHX recurring) lives on the
+            dashboard.{" "}
+            {selected.length === 0
+              ? "All stores"
+              : selected.length === 1
+                ? selected[0]
+                : `${selected.length} stores selected`} · {subLine}
           </div>
         </div>
         <div className="pnl-controls">
@@ -102,14 +126,14 @@ export default async function PnlPage({
               <SegLink
                 key={r.id}
                 active={!hasCustom && r.id === range.id}
-                href={`/pnl${qs({ range: r.id, store: storeFilter })}`}
+                href={`/pnl${qs({ range: r.id, store: activeParam })}`}
               >
                 {r.label}
               </SegLink>
             ))}
             <SegLink
               active={hasCustom}
-              href={`/pnl${qs({ store: storeFilter, from: customFrom ?? "", to: customTo ?? "" })}`}
+              href={`/pnl${qs({ store: activeParam, from: customFrom ?? "", to: customTo ?? "" })}`}
             >
               Custom
             </SegLink>
@@ -118,18 +142,38 @@ export default async function PnlPage({
             action="/pnl"
             from={customFrom ?? rows[rows.length - 1]?.date}
             to={customTo ?? rows[0]?.date}
-            hidden={{ store: storeFilter }}
+            hidden={{ store: activeParam }}
           />
-          <div className="seg" role="tablist" aria-label="Store">
-            {storeOptions.map((s) => (
-              <SegLink
-                key={s.id}
-                active={s.id === storeFilter}
-                href={`/pnl${qs({ range: range.id, store: s.id })}`}
-              >
-                {s.label}
-              </SegLink>
-            ))}
+          <div
+            role="group"
+            aria-label="Stores"
+            style={{
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <Link
+              href={chipHrefAll}
+              className={`store-chip ${allChipActive ? "active" : ""}`}
+              prefetch={false}
+            >
+              All
+            </Link>
+            {stores.map((s) => {
+              const isOn = selected.includes(s.id);
+              return (
+                <Link
+                  key={s.id}
+                  href={buildToggleHref(s.id)}
+                  className={`store-chip ${isOn ? "active" : ""}`}
+                  prefetch={false}
+                >
+                  {s.id}
+                </Link>
+              );
+            })}
           </div>
           <Link href={exportHref} className="primary-btn">
             <Download size={13} strokeWidth={2} />
@@ -186,14 +230,11 @@ export default async function PnlPage({
                 <th className="num">Gross Profit</th>
                 <th className="num">Net Profit</th>
                 <th className="num">ROAS</th>
-                <th className="num">Margin</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const roas = r.ad_spend > 0 ? r.revenue / r.ad_spend : 0;
-                const marginTone =
-                  r.margin_pct >= 15 ? "pos" : r.margin_pct < 0 ? "neg" : "";
                 return (
                   <tr key={r.date}>
                     <td>{fmtDate(r.date)}</td>
@@ -213,19 +254,6 @@ export default async function PnlPage({
                       className={`num roas ${r.ad_spend > 0 ? (roas >= 2 ? "pos" : "neg") : ""}`}
                     >
                       {r.ad_spend > 0 ? `${roas.toFixed(2)}x` : "—"}
-                    </td>
-                    <td
-                      className={`num ${marginTone}`}
-                      style={{
-                        color:
-                          marginTone === "pos"
-                            ? "var(--accent)"
-                            : marginTone === "neg"
-                              ? "var(--negative)"
-                              : "var(--muted-strong)",
-                      }}
-                    >
-                      {fmtPct(r.margin_pct)}
                     </td>
                   </tr>
                 );
@@ -249,19 +277,6 @@ export default async function PnlPage({
                     className={`num roas ${totals.ad_spend > 0 ? (totals.roas >= 2 ? "pos" : "neg") : ""}`}
                   >
                     {totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
-                  </td>
-                  <td
-                    className="num"
-                    style={{
-                      color:
-                        totals.margin_pct >= 15
-                          ? "var(--accent)"
-                          : totals.margin_pct < 0
-                            ? "var(--negative)"
-                            : "var(--muted-strong)",
-                    }}
-                  >
-                    {fmtPct(totals.margin_pct)}
                   </td>
                 </tr>
               </tfoot>

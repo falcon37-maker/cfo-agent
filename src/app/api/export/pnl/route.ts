@@ -11,8 +11,20 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 //   or ?from=YYYY-MM-DD&to=YYYY-MM-DD&store=…
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const storeParam = (params.get("store") ?? "all").toLowerCase();
-  const storeFilter = storeParam === "all" ? "all" : storeParam.toUpperCase();
+  const storeParam = params.get("store") ?? "";
+  const selectedStores =
+    !storeParam || storeParam.toLowerCase() === "all"
+      ? []
+      : storeParam
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
+  const storeLabel =
+    selectedStores.length === 0
+      ? "ALL"
+      : selectedStores.length === 1
+        ? selectedStores[0]
+        : selectedStores.join("+");
 
   const from = params.get("from");
   const to = params.get("to");
@@ -23,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   const ledger = await loadPnlLedger(
     hasCustom ? { from: from!, to: to! } : { days },
-    storeFilter,
+    selectedStores,
   );
 
   const header = [
@@ -40,7 +52,6 @@ export async function GET(request: NextRequest) {
     "Margin %",
     "Orders",
   ];
-  const storeLabel = storeFilter === "all" ? "ALL" : storeFilter;
   const lines = [header.join(",")];
 
   for (const r of ledger.rows) {
