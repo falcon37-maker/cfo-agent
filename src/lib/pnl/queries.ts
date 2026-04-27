@@ -265,10 +265,10 @@ export type BlendedDailyRow = {
   shopify_refunds: number;
   phx_revenue: number; // PHX total (frontend + subs + upsell), per-day actual
   phx_net_contribution: number; // phx_revenue × (1 − fee_rate)
-  phx_subs_billed: number; // count of recurring + salvage tx on this day
+  phx_subs_billed: number; // count of initial + recurring + salvage tx on this day
   // Per-day actuals from PHX (no amortization), broken out for the table:
-  phx_frontend_revenue: number; // Direct + Initial (Vip Initial included)
-  phx_subs_revenue: number; // Recurring + Salvage
+  phx_frontend_revenue: number; // Direct only
+  phx_subs_revenue: number; // Initial + Recurring + Salvage (Initial is PHX-only)
   phx_upsell_revenue: number;
   total_revenue: number;
   total_net_profit: number;
@@ -322,11 +322,16 @@ type PhxDayJson = {
 };
 
 type PhxDayTotals = {
-  frontend: number; // direct + initial
-  subs: number; // recurring + salvage
+  /** PHX Direct Sale only — one-time non-subscription orders. */
+  frontend: number;
+  /** PHX Initial + Recurring + Salvage. Initial transactions are PHX-only
+   *  (they don't flow through Shopify checkout), so including them here
+   *  doesn't double-count anything. */
+  subs: number;
   upsell: number;
   total: number;
-  subsBilledCount: number; // recurringCount + salvageCount
+  /** initialCount + recurringCount + salvageCount. */
+  subsBilledCount: number;
 };
 
 /**
@@ -345,6 +350,7 @@ function rollupPhxByDay(rows: PhxSnapshot[]): Map<string, PhxDayTotals> {
     const salvage = Number(r.revenue_salvage ?? 0);
     const upsell = Number(r.revenue_upsell ?? 0);
     const json = (r.raw_json as PhxDayJson | null) ?? {};
+    const initialCount = Number(json.initialCount ?? 0);
     const recurringCount = Number(json.recurringCount ?? 0);
     const salvageCount = Number(json.salvageCount ?? 0);
 
@@ -355,11 +361,14 @@ function rollupPhxByDay(rows: PhxSnapshot[]): Map<string, PhxDayTotals> {
       total: 0,
       subsBilledCount: 0,
     };
-    cur.frontend += direct + initial;
-    cur.subs += recurring + salvage;
+    // Direct = one-time non-subscription. Subs = Initial + Recurring +
+    // Salvage. Initial doesn't flow through Shopify checkout — it's PHX-
+    // only — so counting it as Subs Rev doesn't double-count Shopify.
+    cur.frontend += direct;
+    cur.subs += initial + recurring + salvage;
     cur.upsell += upsell;
     cur.total += direct + initial + recurring + salvage + upsell;
-    cur.subsBilledCount += recurringCount + salvageCount;
+    cur.subsBilledCount += initialCount + recurringCount + salvageCount;
     out.set(date, cur);
   }
   return out;
@@ -643,10 +652,11 @@ export async function loadPnlLedger(
   const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
   const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter, tenantId);
 
-  // Subs Rev = Recurring + Salvage only. PHX "Initial" and "Direct" both
-  // flow through the Shopify checkout, so daily_pnl.revenue already counts
-  // them — adding revenue_initial here would double-count first-month
-  // subscription sign-ups.
+  // Subs Rev = Initial + Recurring + Salvage. Initial transactions are
+  // PHX-only — they don't flow through Shopify checkout — so including them
+  // here doesn't double-count anything in daily_pnl.revenue. PHX "Direct"
+  // (one-time, non-subscription) is the only thing that overlaps with
+  // Shopify, and that stays out of subs.
   const phxSubsByDate = new Map<
     string,
     { revenue: number; orders: number }
@@ -654,10 +664,14 @@ export async function loadPnlLedger(
   for (const r of phxRows) {
     if (!r.range_from || r.range_from !== r.range_to) continue;
     const subs =
-      Number(r.revenue_recurring ?? 0) + Number(r.revenue_salvage ?? 0);
+      Number(r.revenue_initial ?? 0) +
+      Number(r.revenue_recurring ?? 0) +
+      Number(r.revenue_salvage ?? 0);
     const j = (r.raw_json as Record<string, unknown> | null) ?? {};
     const subOrders =
-      Number(j.recurringCount ?? 0) + Number(j.salvageCount ?? 0);
+      Number(j.initialCount ?? 0) +
+      Number(j.recurringCount ?? 0) +
+      Number(j.salvageCount ?? 0);
     const cur = phxSubsByDate.get(r.range_from) ?? { revenue: 0, orders: 0 };
     cur.revenue += subs;
     cur.orders += subOrders;
