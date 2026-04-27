@@ -22,7 +22,6 @@
 // "complete"), so the cron driver can see what's happening if it polls.
 
 import { NextRequest } from "next/server";
-import { after } from "next/server";
 import { backfillRevenueForRange } from "@/lib/solvpath/sync";
 import { listActiveTenants, type Tenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -87,17 +86,19 @@ function buildSelfUrl(
   return u.toString();
 }
 
-function scheduleNext(req: NextRequest, nextUrl: string) {
+async function scheduleNext(req: NextRequest, nextUrl: string) {
   const headers: Record<string, string> = {};
   const auth = req.headers.get("authorization");
   if (auth) headers["authorization"] = auth;
-  // Fire-and-forget. after() keeps the function alive past the response so
-  // the fetch is actually dispatched before Vercel freezes the invocation.
-  after(
-    fetch(nextUrl, { method: "POST", headers }).catch((err) => {
-      console.error("[solvpath-daily] re-trigger failed:", err);
-    }),
-  );
+  // Fire-and-forget. We give it ~250ms before letting the response return,
+  // long enough for the TCP connection to start and Vercel to register
+  // the outbound request, but short enough that the cron driver still sees
+  // a fast response. We don't await the fetch to completion — the next
+  // invocation has its own 800s budget.
+  void fetch(nextUrl, { method: "POST", headers }).catch((err) => {
+    console.error("[solvpath-daily] re-trigger failed:", err);
+  });
+  await new Promise((r) => setTimeout(r, 250));
 }
 
 async function handle(req: NextRequest) {
@@ -203,7 +204,7 @@ async function handle(req: NextRequest) {
       startStatus: p.nextStatus,
       startPage: p.nextPage,
     });
-    scheduleNext(req, url);
+    await scheduleNext(req, url);
     scheduled = url;
   } else {
     const idx = tenants.findIndex((t) => t.id === tenant.id);
@@ -211,7 +212,7 @@ async function handle(req: NextRequest) {
     if (nextTenant) {
       nextStep = "next-tenant";
       const url = buildSelfUrl(req, { date: day, tenantId: nextTenant.id });
-      scheduleNext(req, url);
+      await scheduleNext(req, url);
       scheduled = url;
     } else {
       nextStep = "complete";
