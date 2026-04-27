@@ -154,7 +154,6 @@ async function handle(req: NextRequest) {
   // PHX tenant. If cursor present: continue that tenant (fresh chunk in
   // the middle of a day).
   let tenant: Tenant | undefined;
-  let isFirstChunkForTenant = false;
   if (cursorTenantId) {
     tenant = tenants.find((t) => t.id === cursorTenantId);
     if (!tenant) {
@@ -166,11 +165,16 @@ async function handle(req: NextRequest) {
         { status: 400 },
       );
     }
-    isFirstChunkForTenant = !cursorStartStatus && !cursorStartPage;
   } else {
     tenant = tenants[0];
-    isFirstChunkForTenant = true;
   }
+
+  // Reset only when explicitly asked via ?reset=1 — otherwise we'd wipe
+  // an in-progress day every time someone re-kicks the chain externally.
+  // Without reset, the dedupe marker + per-store rows persist and new
+  // chunks merge additively. backfillRevenueForRange loads the seen-set
+  // automatically and skips already-processed customers.
+  const wantsReset = sp.get("reset") === "1";
 
   const startedAt = Date.now();
   const validStatuses = ["Active", "Canceled", "Never Enrolled"] as const;
@@ -186,10 +190,7 @@ async function handle(req: NextRequest) {
     to: day,
     startStatus,
     startPage: cursorStartPage,
-    // Reset only on the FIRST chunk of the FIRST tenant for this date —
-    // i.e. when the user / cron called us with no cursor at all. Otherwise
-    // we'd wipe progress mid-loop.
-    reset: isFirstChunkForTenant,
+    reset: wantsReset,
     maxCustomers: CHUNK_MAX_CUSTOMERS,
     throttleMs: 75,
     deadlineMs: CHUNK_DEADLINE_MS,
