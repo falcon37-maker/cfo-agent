@@ -42,8 +42,23 @@ async function handle(req: NextRequest) {
 
   try {
     if (action === "ping") {
-      const p = await ping();
-      return Response.json({ ok: true, action, total: p.total, sample: p.sample });
+      // Resolve tenant the same way as the backfill action below
+      const explicitTenantId = req.nextUrl.searchParams.get("tenantId");
+      let tenantId = explicitTenantId ?? null;
+      if (!tenantId) {
+        const tenants = await listActiveTenants();
+        if (tenants.length === 1) tenantId = tenants[0].id;
+        else
+          return Response.json(
+            {
+              error:
+                "Multiple active tenants — pass ?tenantId=<uuid> to disambiguate.",
+            },
+            { status: 400 },
+          );
+      }
+      const p = await ping(tenantId);
+      return Response.json({ ok: true, action, tenantId, total: p.total, sample: p.sample });
     }
 
     if (action === "backfill") {

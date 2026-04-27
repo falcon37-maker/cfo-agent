@@ -65,10 +65,15 @@ export type AlertFilters = {
   per_page?: number;
 };
 
-function requireKey(): string {
-  const k = process.env.CHARGEBLAST_API_KEY;
-  if (!k) throw new Error("CHARGEBLAST_API_KEY not set");
-  return k;
+import { getChargeblastCreds } from "@/lib/integrations";
+
+async function requireKey(tenantId: string): Promise<string> {
+  const creds = await getChargeblastCreds(tenantId);
+  if (creds?.apiKey) return creds.apiKey;
+  throw new Error(
+    `Chargeblast API key not configured for tenant ${tenantId}. ` +
+      `Save it in Settings → Integrations or set CHARGEBLAST_API_KEY in env.`,
+  );
 }
 
 /**
@@ -111,11 +116,12 @@ function normalize(a: RawAlert): ChargeblastAlert {
 }
 
 async function cbFetch<T>(
+  tenantId: string,
   path: string,
   query: Record<string, string | number | undefined> = {},
 ): Promise<T> {
   const url = new URL(`${BASE}${path}`);
-  url.searchParams.set("api_key", requireKey());
+  url.searchParams.set("api_key", await requireKey(tenantId));
   for (const [k, v] of Object.entries(query)) {
     if (v !== undefined && v !== null && v !== "") {
       url.searchParams.set(k, String(v));
@@ -129,13 +135,16 @@ async function cbFetch<T>(
   return (await res.json()) as T;
 }
 
-export async function listAlertsPage(filters: AlertFilters = {}): Promise<{
+export async function listAlertsPage(
+  tenantId: string,
+  filters: AlertFilters = {},
+): Promise<{
   alerts: ChargeblastAlert[];
   total: number;
   page: number;
   per: number;
 }> {
-  const raw = await cbFetch<RawList>("/alerts", {
+  const raw = await cbFetch<RawList>(tenantId, "/alerts", {
     start_date: filters.start_date,
     end_date: filters.end_date,
     status: filters.status,
@@ -153,11 +162,12 @@ export async function listAlertsPage(filters: AlertFilters = {}): Promise<{
 /** Iterate every page of /alerts within the given filters. Driven by the
  *  API's actual per-page size rather than our request. */
 export async function* iterateAlerts(
+  tenantId: string,
   filters: AlertFilters = {},
 ): AsyncGenerator<ChargeblastAlert> {
   let page = 1;
   while (true) {
-    const resp = await listAlertsPage({ ...filters, page });
+    const resp = await listAlertsPage(tenantId, { ...filters, page });
     for (const a of resp.alerts) yield a;
     const perPage = resp.per || resp.alerts.length;
     if (!perPage) break;
@@ -169,11 +179,11 @@ export async function* iterateAlerts(
 }
 
 /** Sanity-check the credential. */
-export async function ping(): Promise<{
+export async function ping(tenantId: string): Promise<{
   ok: true;
   total: number;
   sample: ChargeblastAlert | null;
 }> {
-  const r = await listAlertsPage({});
+  const r = await listAlertsPage(tenantId, {});
   return { ok: true, total: r.total, sample: r.alerts[0] ?? null };
 }

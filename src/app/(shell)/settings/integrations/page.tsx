@@ -2,9 +2,17 @@ import { loadCredentials, zohoEnv } from "@/lib/zoho/tokens";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hasStoreCreds } from "@/lib/shopify/stores";
 import { requireTenant } from "@/lib/tenant";
+import { describeIntegrationStatus } from "@/lib/integrations";
+import {
+  SecretField,
+  SaveButton,
+} from "@/components/settings/CredentialCard";
 import {
   pingChargeblastAction,
   syncChargeblastAction,
+  saveChargeblastAction,
+  saveSolvpathAction,
+  saveZohoOrgAction,
 } from "./actions";
 import {
   CheckCircle2,
@@ -56,13 +64,17 @@ export default async function IntegrationsSettingsPage({
     cb_seen?: string;
     cb_mapped?: string;
     cb_upserted?: string;
+    cb_save?: string;
+    sp_save?: string;
+    zb_save?: string;
   }>;
 }) {
   const params = await searchParams;
   const tenant = await requireTenant();
-  const [creds, shopifyStores] = await Promise.all([
+  const [creds, shopifyStores, integrationStatus] = await Promise.all([
     loadCredentials(tenant.id),
     loadShopifyStores(tenant.id),
+    describeIntegrationStatus(tenant.id),
   ]);
   // Pre-resolve credsSet for each store so the JSX can render synchronously.
   const storeCredsSet = new Map<string, boolean>();
@@ -124,6 +136,148 @@ export default async function IntegrationsSettingsPage({
           Chargeblast sync failed: {params.cb_msg ?? "unknown error"}
         </div>
       ) : null}
+
+      {params.cb_save ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Chargeblast credentials saved.
+        </div>
+      ) : null}
+      {params.sp_save ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Solvpath credentials saved.
+        </div>
+      ) : null}
+      {params.zb_save ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Zoho organization saved.
+        </div>
+      ) : null}
+
+      {/* Provider credentials — store API keys per-tenant in DB */}
+      <div>
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--text)",
+            margin: "8px 0 10px",
+          }}
+        >
+          Provider credentials
+        </h3>
+        <div className="section-sub" style={{ marginBottom: 10 }}>
+          API keys saved here are encrypted and used by the cron jobs and
+          server actions. Empty fields keep existing saved values; type{" "}
+          <span className="mono">CLEAR</span> to wipe.
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {/* Chargeblast credentials */}
+          <form
+            action={saveChargeblastAction}
+            className="card"
+            style={{ padding: 16, display: "grid", gap: 10 }}
+          >
+            <div className="card-title">Chargeblast</div>
+            <div className="card-sub">
+              {integrationStatus.chargeblast.configured
+                ? `Saved · fields: ${integrationStatus.chargeblast.fields.join(", ")}`
+                : "Not configured · falls back to env"}
+            </div>
+            <SecretField
+              name="api_key"
+              label="API key"
+              hasSaved={integrationStatus.chargeblast.fields.includes("apiKey")}
+            />
+            <SecretField
+              name="webhook_secret"
+              label="Webhook secret (svix)"
+              hasSaved={integrationStatus.chargeblast.fields.includes("webhookSecret")}
+            />
+            <SaveButton />
+          </form>
+
+          {/* Solvpath / PHX credentials */}
+          <form
+            action={saveSolvpathAction}
+            className="card"
+            style={{ padding: 16, display: "grid", gap: 10 }}
+          >
+            <div className="card-title">Solvpath / PHX</div>
+            <div className="card-sub">
+              {integrationStatus.solvpath.configured
+                ? `Saved · fields: ${integrationStatus.solvpath.fields.join(", ")}`
+                : "Not configured · falls back to env"}
+            </div>
+            <label className="field">
+              <span className="field-label">Partner ID</span>
+              <div className="field-input">
+                <input
+                  type="text"
+                  name="partner_id"
+                  placeholder={process.env.SOLVPATH_PARTNER_ID ?? ""}
+                />
+              </div>
+            </label>
+            <SecretField
+              name="partner_token"
+              label="Partner token"
+              hasSaved={integrationStatus.solvpath.fields.includes("partnerToken")}
+            />
+            <SecretField
+              name="bearer_token"
+              label="Bearer token"
+              hasSaved={integrationStatus.solvpath.fields.includes("bearerToken")}
+            />
+            <label className="field">
+              <span className="field-label">Base URL (optional)</span>
+              <div className="field-input">
+                <input
+                  type="text"
+                  name="base_url"
+                  placeholder="https://pffe.phoenixtechnologies.io/phxcrm"
+                />
+              </div>
+            </label>
+            <SaveButton />
+          </form>
+
+          {/* Zoho Books org */}
+          <form
+            action={saveZohoOrgAction}
+            className="card"
+            style={{ padding: 16, display: "grid", gap: 10 }}
+          >
+            <div className="card-title">Zoho Books</div>
+            <div className="card-sub">
+              {integrationStatus.zoho_books.configured
+                ? `Org ${integrationStatus.zoho_books.fields.includes("orgId") ? "saved" : "not set"}`
+                : "Connect via OAuth below; org ID is per-tenant"}
+            </div>
+            <label className="field">
+              <span className="field-label">Organization ID</span>
+              <div className="field-input">
+                <input
+                  type="text"
+                  name="org_id"
+                  defaultValue={ORG_ID || ""}
+                  placeholder="921725090"
+                />
+              </div>
+            </label>
+            <SaveButton />
+          </form>
+        </div>
+      </div>
 
       {/* Zoho Books */}
       <div className="integration-list card">

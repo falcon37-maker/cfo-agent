@@ -84,7 +84,7 @@ export async function syncAlerts(
     batch.length = 0;
   };
 
-  for await (const a of iterateAlerts(filters)) {
+  for await (const a of iterateAlerts(tenantId, filters)) {
     seen += 1;
     const storeId = matchDescriptor(a.merchant_descriptor, descriptorEntries);
     if (storeId) mapped += 1;
