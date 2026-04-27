@@ -30,8 +30,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
-const CHUNK_DEADLINE_MS = 60_000; // single chunk wall budget — fits inside 800s
-const CHUNK_MAX_CUSTOMERS = 500; // matches the existing chunked-backfill default
+// Vercel's edge cap closes the connection at 60s for non-streaming
+// responses. We want the chunk + DB write + scheduleNext head-start to
+// fit comfortably under that. 40s matches the existing
+// /api/sync/solvpath default and tested at ~44s total response time.
+const CHUNK_DEADLINE_MS = 40_000;
+const CHUNK_MAX_CUSTOMERS = 500;
 
 function unauthorized() {
   return Response.json({ error: "unauthorized" }, { status: 401 });
