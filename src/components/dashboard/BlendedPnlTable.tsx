@@ -24,6 +24,7 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
       acc.frontend_rev +=
         r.phx_frontend_revenue + r.shopify_revenue + r.phx_upsell_revenue;
       acc.subs_rev += r.phx_subs_revenue;
+      acc.manual_rev += r.manual_revenue;
       acc.total_rev += r.total_revenue;
       acc.ad_spend += r.shopify_ad_spend;
       acc.cogs += r.shopify_cogs;
@@ -35,6 +36,7 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
       subs: 0,
       frontend_rev: 0,
       subs_rev: 0,
+      manual_rev: 0,
       total_rev: 0,
       ad_spend: 0,
       cogs: 0,
@@ -42,6 +44,9 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
     },
   );
   const totalRoas = totals.ad_spend > 0 ? totals.total_rev / totals.ad_spend : 0;
+  // Show MANUAL REV column only when this tenant has logged any. Keeps the
+  // table tight for ecom-only users.
+  const showManual = totals.manual_rev > 0;
 
   return (
     <div className="card table-card">
@@ -66,6 +71,7 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 <th className="num">Subs Billed</th>
                 <th className="num">Frontend Rev</th>
                 <th className="num">Subs Rev</th>
+                {showManual ? <th className="num">Manual Rev</th> : null}
                 <th className="num">Total Rev</th>
                 <th className="num">COGS</th>
                 <th className="num">Ad Spend</th>
@@ -104,6 +110,13 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                         ? fmtMoney(r.phx_subs_revenue)
                         : "—"}
                     </td>
+                    {showManual ? (
+                      <td className="num muted">
+                        {r.manual_revenue > 0
+                          ? fmtMoney(r.manual_revenue)
+                          : "—"}
+                      </td>
+                    ) : null}
                     <td className="num" style={{ fontWeight: 550 }}>
                       {fmtMoney(r.total_revenue)}
                     </td>
@@ -144,6 +157,9 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 <td className="num">
                   {totals.subs_rev > 0 ? fmtMoney(totals.subs_rev) : "—"}
                 </td>
+                {showManual ? (
+                  <td className="num">{fmtMoney(totals.manual_rev)}</td>
+                ) : null}
                 <td className="num">{fmtMoney(totals.total_rev)}</td>
                 <td className="num">{fmtMoney(totals.cogs)}</td>
                 <td className="num">{fmtMoney(totals.ad_spend)}</td>

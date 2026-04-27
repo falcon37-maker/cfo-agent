@@ -14,6 +14,7 @@ import {
   Megaphone,
   ShieldAlert,
   Landmark,
+  DollarSign,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
 import type { Role } from "@/lib/auth/roles";
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { href: "/calculator", label: "Calculator", icon: Calculator },
   { href: "/cogs", label: "Log COGS", icon: CheckSquare },
   { href: "/ads", label: "Log Ad Spend", icon: Megaphone, roles: ["admin"] },
+  { href: "/revenue", label: "Log Revenue", icon: DollarSign, roles: ["admin"] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 

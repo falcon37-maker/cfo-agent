@@ -270,6 +270,9 @@ export type BlendedDailyRow = {
   phx_frontend_revenue: number; // Direct only
   phx_subs_revenue: number; // Initial + Recurring + Salvage (Initial is PHX-only)
   phx_upsell_revenue: number;
+  /** Sum of manual_revenue_entries.amount for this day. Coaching, consulting,
+   *  one-off sales — anything not covered by an API integration. */
+  manual_revenue: number;
   total_revenue: number;
   total_net_profit: number;
 };
@@ -287,6 +290,7 @@ export type BlendedTotals = {
   phx_subs_revenue: number;
   phx_upsell_revenue: number;
   phx_subs_billed: number;
+  manual_revenue: number;
   total_revenue: number;
   total_net_profit: number;
   roas: number; // total_revenue / shopify_ad_spend
@@ -415,6 +419,14 @@ export async function loadBlendedDashboardData(
   const phxByDayCur = rollupPhxByDay(phxCur);
   const phxByDayPrior = rollupPhxByDay(phxPrior);
 
+  // Manual revenue entries (coaching / consulting / one-offs).
+  const manualByDayCur = await loadManualRevenueByDay(tenantId, from, to);
+  const manualByDayPrior = await loadManualRevenueByDay(
+    tenantId,
+    priorFrom,
+    priorTo,
+  );
+
   // Split Shopify rows: keep non-PHX-store rows as the revenue source;
   // PHX-store rows only contribute cogs/refunds/ad_spend/orders (revenue is
   // taken from PHX for those stores).
@@ -457,6 +469,7 @@ export async function loadBlendedDashboardData(
       - phxShop.refunds
       - phxShop.fees;
     const nonPhxContribution = nonPhxShop.net_profit;
+    const manual = manualByDayCur.get(cur) ?? 0;
     daily.push({
       date: cur,
       shopify_revenue: round2(nonPhxShop.revenue),
@@ -471,8 +484,9 @@ export async function loadBlendedDashboardData(
       phx_frontend_revenue: round2(phx.frontend),
       phx_subs_revenue: round2(phx.subs),
       phx_upsell_revenue: round2(phx.upsell),
-      total_revenue: round2(nonPhxShop.revenue + phx.total),
-      total_net_profit: round2(nonPhxContribution + phxContribution),
+      manual_revenue: round2(manual),
+      total_revenue: round2(nonPhxShop.revenue + phx.total + manual),
+      total_net_profit: round2(nonPhxContribution + phxContribution + manual),
     });
     cur = addDays(cur, 1);
   }
@@ -491,6 +505,7 @@ export async function loadBlendedDashboardData(
       - phxShop.cogs
       - phxShop.refunds
       - phxShop.fees;
+    const manualP = manualByDayPrior.get(curP) ?? 0;
     priorDaily.push({
       date: curP,
       shopify_revenue: round2(nonPhxShop.revenue),
@@ -505,8 +520,9 @@ export async function loadBlendedDashboardData(
       phx_frontend_revenue: round2(phx.frontend),
       phx_subs_revenue: round2(phx.subs),
       phx_upsell_revenue: round2(phx.upsell),
-      total_revenue: round2(nonPhxShop.revenue + phx.total),
-      total_net_profit: round2(nonPhxShop.net_profit + phxContribution),
+      manual_revenue: round2(manualP),
+      total_revenue: round2(nonPhxShop.revenue + phx.total + manualP),
+      total_net_profit: round2(nonPhxShop.net_profit + phxContribution + manualP),
     });
     curP = addDays(curP, 1);
   }
@@ -556,7 +572,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     phx_frontend_revenue = 0,
     phx_subs_revenue = 0,
     phx_upsell_revenue = 0,
-    phx_subs_billed = 0;
+    phx_subs_billed = 0,
+    manual_revenue = 0;
   for (const r of rows) {
     shopify_revenue += r.shopify_revenue;
     shopify_ad_spend += r.shopify_ad_spend;
@@ -570,9 +587,10 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     phx_subs_revenue += r.phx_subs_revenue;
     phx_upsell_revenue += r.phx_upsell_revenue;
     phx_subs_billed += r.phx_subs_billed;
+    manual_revenue += r.manual_revenue;
   }
-  const total_revenue = shopify_revenue + phx_revenue;
-  const total_net_profit = shopify_net_profit + phx_net_contribution;
+  const total_revenue = shopify_revenue + phx_revenue + manual_revenue;
+  const total_net_profit = shopify_net_profit + phx_net_contribution + manual_revenue;
   return {
     shopify_revenue: round2(shopify_revenue),
     shopify_ad_spend: round2(shopify_ad_spend),
@@ -586,11 +604,32 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     phx_subs_revenue: round2(phx_subs_revenue),
     phx_upsell_revenue: round2(phx_upsell_revenue),
     phx_subs_billed,
+    manual_revenue: round2(manual_revenue),
     total_revenue: round2(total_revenue),
     total_net_profit: round2(total_net_profit),
     roas: shopify_ad_spend > 0 ? total_revenue / shopify_ad_spend : 0,
     margin_pct: total_revenue > 0 ? (total_net_profit / total_revenue) * 100 : 0,
   };
+}
+
+/** Sum manual_revenue_entries by date for a tenant + window. */
+async function loadManualRevenueByDay(
+  tenantId: string,
+  from: string,
+  to: string,
+): Promise<Map<string, number>> {
+  const sb = supabaseAdmin();
+  const { data } = await sb
+    .from("manual_revenue_entries")
+    .select("date, amount")
+    .eq("tenant_id", tenantId)
+    .gte("date", from)
+    .lte("date", to);
+  const out = new Map<string, number>();
+  for (const r of (data ?? []) as Array<{ date: string; amount: number | string }>) {
+    out.set(r.date, (out.get(r.date) ?? 0) + Number(r.amount ?? 0));
+  }
+  return out;
 }
 
 function round2(n: number): number {

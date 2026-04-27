@@ -23,6 +23,7 @@ export function canAccess(role: Role, pathname: string): boolean {
 
   // Manager allow-list
   if (pathname === "/cogs" || pathname.startsWith("/cogs/")) return true;
+  if (pathname === "/revenue" || pathname.startsWith("/revenue/")) return true;
   // Auth-related paths are always allowed so sign-out/redirects work.
   if (pathname === "/login" || pathname === "/signup") return true;
   if (pathname === "/onboarding") return true;
