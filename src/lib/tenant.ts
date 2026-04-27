@@ -52,20 +52,51 @@ export async function getCurrentTenant(
   return getTenantForUser(user.id, user.email ?? null);
 }
 
-/** Fetch the tenant for a user. Resolution order:
- *   1. owned tenant (tenants.user_id = userId) — fast path for the
- *      common case
- *   2. tenant_memberships join (covers shared-access users like the
- *      manager email)
- *   Throws if neither yields a tenant. */
+/** Fetch the tenant for a user. Resolution rules:
+ *
+ *   1. Read every tenant_memberships row for the user.
+ *   2. If any row has a non-'owner' role (admin / manager / viewer), that's
+ *      shared access into someone else's workspace — return that tenant.
+ *      It beats the user's own auto-provisioned tenant from the signup
+ *      trigger. Multi-shared-tenant ordering: prefer admin > manager >
+ *      viewer; ties broken by membership creation time.
+ *   3. Otherwise return the 'owner' membership's tenant (the user's
+ *      personal workspace).
+ *   4. If memberships is empty (e.g. an old user before migration 013
+ *      backfilled), fall back to the legacy tenants.user_id lookup. */
 export async function getTenantForUser(
   userId: string,
-  // userEmail kept for log/error context only — no longer load-bearing
-  // for the manager fallback (memberships replaced it in migration 013).
+  // userEmail unused now — left on the signature for compatibility with
+  // existing callers; resolution goes through memberships.
   _userEmail?: string | null,
 ): Promise<Tenant> {
   const sb = supabaseAdmin();
 
+  type MembershipRow = { role: string; created_at: string; tenants: Tenant };
+  const { data: memberships, error: memErr } = await sb
+    .from("tenant_memberships")
+    .select("role, created_at, tenants(*)")
+    .eq("user_id", userId);
+
+  if (!memErr && memberships && memberships.length > 0) {
+    const rows = memberships as unknown as MembershipRow[];
+    const RANK: Record<string, number> = {
+      admin: 0,
+      manager: 1,
+      viewer: 2,
+      owner: 3,
+    };
+    rows.sort((a, b) => {
+      const ra = RANK[a.role] ?? 9;
+      const rb = RANK[b.role] ?? 9;
+      if (ra !== rb) return ra - rb;
+      return a.created_at.localeCompare(b.created_at);
+    });
+    const winner = rows[0];
+    if (winner?.tenants) return winner.tenants;
+  }
+
+  // Legacy fallback when memberships is empty / table missing.
   const { data: owned, error: ownErr } = await sb
     .from("tenants")
     .select("*")
@@ -73,21 +104,6 @@ export async function getTenantForUser(
     .maybeSingle();
   if (ownErr) throw new Error(`getTenantForUser: ${ownErr.message}`);
   if (owned) return owned as Tenant;
-
-  // Membership lookup: if the user belongs to another tenant via
-  // tenant_memberships, return that tenant. Pick the membership with the
-  // lowest-privilege role last so an explicit owner/admin row beats a
-  // legacy manager row when both exist.
-  const { data: memberships } = await sb
-    .from("tenant_memberships")
-    .select("tenant_id, role, tenants(*)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true })
-    .limit(1);
-  const membership = memberships?.[0] as
-    | { tenant_id: string; role: string; tenants: Tenant }
-    | undefined;
-  if (membership?.tenants) return membership.tenants;
 
   throw new Error(
     `No tenant found for user ${userId}. Sign up should provision one — ` +
