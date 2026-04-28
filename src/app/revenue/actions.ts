@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentTenant } from "@/lib/tenant";
+import { getCurrentTenant, WRITE_DATA_ROLES } from "@/lib/tenant";
 
 const VALID_TYPES = new Set([
   "Coaching",
@@ -42,6 +42,9 @@ export async function submitManualRevenueAction(formData: FormData) {
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/revenue");
   const tenant = await getCurrentTenant(auth);
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/revenue?err=forbidden");
+  }
 
   const f = pickFields(formData);
   validate(f);
@@ -73,6 +76,9 @@ export async function updateManualRevenueAction(formData: FormData) {
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/revenue");
   const tenant = await getCurrentTenant(auth);
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/revenue?err=forbidden");
+  }
 
   const id = String(formData.get("id") ?? "");
   if (!id) bad("missing_id");
@@ -107,6 +113,9 @@ export async function deleteManualRevenueAction(formData: FormData) {
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/revenue");
   const tenant = await getCurrentTenant(auth);
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/revenue?err=forbidden");
+  }
 
   const id = String(formData.get("id") ?? "");
   if (!id) bad("missing_id");

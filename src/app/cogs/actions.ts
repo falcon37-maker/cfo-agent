@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getCurrentTenant } from "@/lib/tenant";
+import { getCurrentTenant, ForbiddenError, WRITE_DATA_ROLES } from "@/lib/tenant";
 
 /**
  * Manual daily-COGS submission. Middleware guarantees the user is logged in
@@ -18,6 +18,9 @@ export async function submitCogsAction(formData: FormData) {
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/cogs");
   const tenant = await getCurrentTenant(auth);
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/cogs?err=forbidden");
+  }
 
   const storeId = String(formData.get("store") ?? "").toUpperCase();
   const date = String(formData.get("date") ?? "");
@@ -170,6 +173,9 @@ export async function updateCogsEntryAction(formData: FormData) {
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/cogs");
   const tenant = await getCurrentTenant(auth);
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/cogs?err=forbidden");
+  }
 
   const id = String(formData.get("id") ?? "");
   const storeId = String(formData.get("store") ?? "").toUpperCase();
@@ -247,6 +253,9 @@ export async function deleteCogsEntryAction(formData: FormData) {
   } = await auth.auth.getUser();
   if (!user) redirect("/login?next=/cogs");
   const tenant = await getCurrentTenant(auth);
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/cogs?err=forbidden");
+  }
 
   const id = String(formData.get("id") ?? "");
   if (!id) redirect("/cogs?err=input");

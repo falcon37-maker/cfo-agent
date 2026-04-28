@@ -4,7 +4,15 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { encrypt, hasEncryptionKey } from "@/lib/crypto";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, ADMIN_ROLES } from "@/lib/tenant";
+
+async function requireAdmin() {
+  const tenant = await requireTenant();
+  if (!ADMIN_ROLES.includes(tenant.role)) {
+    redirect("/settings?err=forbidden");
+  }
+  return tenant;
+}
 
 const STORE_CODE_RE = /^[A-Z][A-Z0-9_]{1,15}$/;
 
@@ -60,7 +68,7 @@ function validate(f: ReturnType<typeof pickStoreFields>) {
 
 /** Insert a new store. Encrypts shopify creds if provided. */
 export async function createStoreAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const f = pickStoreFields(formData);
   validate(f);
 
@@ -102,7 +110,7 @@ export async function createStoreAction(formData: FormData) {
 }
 
 export async function updateStoreAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const f = pickStoreFields(formData);
   validate(f);
 
@@ -146,7 +154,7 @@ export async function updateStoreAction(formData: FormData) {
 
 /** Soft-delete: flip is_active false; keeps history rows + lets us reactivate. */
 export async function deactivateStoreAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const id = String(formData.get("id") ?? "").trim().toUpperCase();
   if (!STORE_CODE_RE.test(id)) bad("invalid_code");
 

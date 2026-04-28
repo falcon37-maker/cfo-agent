@@ -22,13 +22,46 @@ export type Tenant = {
   updated_at: string;
 };
 
+export type TenantRole = "owner" | "admin" | "manager" | "viewer";
+
+/** Tenant + the active user's role within it. Returned by requireTenant /
+ *  getCurrentTenant so write-protected actions can gate without an extra
+ *  membership lookup. */
+export type ResolvedTenant = Tenant & { role: TenantRole };
+
+/** Roles permitted to log day-to-day data (COGS / ad spend / revenue). */
+export const WRITE_DATA_ROLES: TenantRole[] = ["owner", "admin", "manager"];
+
+/** Roles permitted to change settings (stores, integrations, team). */
+export const ADMIN_ROLES: TenantRole[] = ["owner", "admin"];
+
+export class ForbiddenError extends Error {
+  constructor(public readonly required: TenantRole[], public readonly actual: TenantRole) {
+    super(`Forbidden: requires ${required.join("|")}, got ${actual}`);
+    this.name = "ForbiddenError";
+  }
+}
+
 /** Resolve the current tenant for the in-flight request — opens an SSR
  *  Supabase client off the cookie store, reads auth.getUser(), and looks
  *  up the matching tenants row. Use this from Server Components, Server
  *  Actions, and Route Handlers that run in a request context. */
-export async function requireTenant(): Promise<Tenant> {
+export async function requireTenant(): Promise<ResolvedTenant> {
   const ssr = await createSupabaseServerClient();
   return getCurrentTenant(ssr);
+}
+
+/** Throws a ForbiddenError if the current tenant role isn't in `allowed`.
+ *  Returns the resolved tenant on success. Server actions catch this and
+ *  redirect with ?err=forbidden; Route Handlers convert it to 403. */
+export async function requireRole(
+  allowed: TenantRole[],
+): Promise<ResolvedTenant> {
+  const tenant = await requireTenant();
+  if (!allowed.includes(tenant.role)) {
+    throw new ForbiddenError(allowed, tenant.role);
+  }
+  return tenant;
 }
 
 /** Resolve the current tenant from a SSR-bound Supabase client (which has
@@ -41,7 +74,7 @@ export async function requireTenant(): Promise<Tenant> {
  *  policies landing first. */
 export async function getCurrentTenant(
   ssrClient: SupabaseClient,
-): Promise<Tenant> {
+): Promise<ResolvedTenant> {
   const {
     data: { user },
     error,
@@ -69,10 +102,14 @@ export async function getTenantForUser(
   // userEmail unused now — left on the signature for compatibility with
   // existing callers; resolution goes through memberships.
   _userEmail?: string | null,
-): Promise<Tenant> {
+): Promise<ResolvedTenant> {
   const sb = supabaseAdmin();
 
-  type MembershipRow = { role: string; created_at: string; tenants: Tenant };
+  type MembershipRow = {
+    role: TenantRole;
+    created_at: string;
+    tenants: Tenant;
+  };
   const { data: memberships, error: memErr } = await sb
     .from("tenant_memberships")
     .select("role, created_at, tenants(*)")
@@ -93,7 +130,9 @@ export async function getTenantForUser(
       return a.created_at.localeCompare(b.created_at);
     });
     const winner = rows[0];
-    if (winner?.tenants) return winner.tenants;
+    if (winner?.tenants) {
+      return { ...winner.tenants, role: winner.role };
+    }
   }
 
   // Legacy fallback when memberships is empty / table missing.
@@ -103,7 +142,7 @@ export async function getTenantForUser(
     .eq("user_id", userId)
     .maybeSingle();
   if (ownErr) throw new Error(`getTenantForUser: ${ownErr.message}`);
-  if (owned) return owned as Tenant;
+  if (owned) return { ...(owned as Tenant), role: "owner" };
 
   throw new Error(
     `No tenant found for user ${userId}. Sign up should provision one — ` +
@@ -129,7 +168,7 @@ export async function provisionTenant(args: {
   userId: string;
   email: string;
   displayName?: string;
-}): Promise<Tenant> {
+}): Promise<ResolvedTenant> {
   const sb = supabaseAdmin();
   const { data, error } = await sb.rpc("ensure_owner_tenant", {
     p_user_id: args.userId,

@@ -1,28 +1,19 @@
-// Daily Solvpath sync — chunked.
+// Daily Solvpath sync — one Vercel invocation = one long internal loop.
 //
-// One Vercel invocation = one 500-customer chunk (~45s). After the chunk,
-// the route fires-and-forgets a fetch back to itself with the cursor in the
-// URL. Next invocation gets its own 800s budget. Repeat until the day is
-// finished, then advance to the next tenant. This dodges Vercel's hard
-// per-function cap.
+// This is the SAME logic /api/sync/solvpath?action=backfill exposes
+// (drove the Jan-Apr 23 backfill successfully); we just call it
+// repeatedly from inside one cron-fired function until either the day
+// is finished OR our 750s wall budget runs out. No self-retrigger via
+// fetch — that turned out unreliable on Vercel and broke trust in the
+// daily fire.
 //
-// Triggers:
-//   - Vercel cron at 08:30 UTC (no params): runs yesterday across all
-//     tenants that have PHX stores.
-//   - Manual:
-//       /api/cron/solvpath-daily?date=YYYY-MM-DD&secret=$CRON_SECRET
-//     Runs that day across every PHX tenant.
-//
-// Self-retrigger params (set by the route, not by the user):
-//   - tenantId    — UUID of the tenant being chunked
-//   - startStatus — Solvpath subscription status to resume from
-//   - startPage   — page within that status to resume from
-//
-// Response is per-chunk: progress, where the next chunk landed (or
-// "complete"), so the cron driver can see what's happening if it polls.
+// vercel.json schedules this route every hour from 08:00–14:00 UTC,
+// so even if a single ~800s invocation can't cover a full ~3500-
+// customer day on its own, the next hour's fire picks up where the
+// previous left off (via the persisted dedupe marker — see
+// loadSeenCustomers / persistSeenCustomers in src/lib/solvpath/sync).
 
 import { NextRequest } from "next/server";
-import { waitUntil } from "@vercel/functions";
 import { backfillRevenueForRange } from "@/lib/solvpath/sync";
 import { listActiveTenants, type Tenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -31,12 +22,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
-// Vercel's edge cap closes the connection at 60s for non-streaming
-// responses. We want the chunk + DB write + scheduleNext head-start to
-// fit comfortably under that. 40s matches the existing
-// /api/sync/solvpath default and tested at ~44s total response time.
+// One chunk = up to 500 customers in up to ~40s (sync.ts default
+// deadlineMs). Loop budget leaves headroom for the response + Supabase
+// writes after the last chunk.
 const CHUNK_DEADLINE_MS = 40_000;
 const CHUNK_MAX_CUSTOMERS = 500;
+const TOTAL_BUDGET_MS = 750_000; // 750s; Vercel cap is 800s
 
 function unauthorized() {
   return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -74,38 +65,6 @@ async function listPhxTenants(): Promise<Tenant[]> {
   return out;
 }
 
-function buildSelfUrl(
-  req: NextRequest,
-  params: Record<string, string | number | undefined | null>,
-): string {
-  const u = new URL(req.url);
-  // Reset query string then re-attach the secret + the new params.
-  const secret = u.searchParams.get("secret");
-  u.search = "";
-  if (secret) u.searchParams.set("secret", secret);
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") {
-      u.searchParams.set(k, String(v));
-    }
-  }
-  return u.toString();
-}
-
-function scheduleNext(req: NextRequest, nextUrl: string) {
-  const headers: Record<string, string> = {};
-  const auth = req.headers.get("authorization");
-  if (auth) headers["authorization"] = auth;
-  // waitUntil keeps the function alive past the response so the fetch
-  // is actually dispatched before Vercel freezes the invocation. The
-  // request fires in the background; the next invocation runs in its
-  // own 800s budget.
-  waitUntil(
-    fetch(nextUrl, { method: "POST", headers }).catch((err) => {
-      console.error("[solvpath-daily] re-trigger failed:", err);
-    }),
-  );
-}
-
 async function handle(req: NextRequest) {
   if (!process.env.CRON_SECRET) {
     return Response.json(
@@ -134,13 +93,6 @@ async function handle(req: NextRequest) {
       ? dateOverride
       : yesterdayUtc();
 
-  const cursorTenantId = sp.get("tenantId");
-  const cursorStartStatus = sp.get("startStatus");
-  const cursorStartPageRaw = sp.get("startPage");
-  const cursorStartPage = cursorStartPageRaw
-    ? Number(cursorStartPageRaw)
-    : undefined;
-
   const tenants = await listPhxTenants();
   if (tenants.length === 0) {
     return Response.json({
@@ -150,97 +102,74 @@ async function handle(req: NextRequest) {
     });
   }
 
-  // Resolve which tenant to run this chunk against. If no cursor: first
-  // PHX tenant. If cursor present: continue that tenant (fresh chunk in
-  // the middle of a day).
-  let tenant: Tenant | undefined;
-  if (cursorTenantId) {
-    tenant = tenants.find((t) => t.id === cursorTenantId);
-    if (!tenant) {
-      return Response.json(
-        {
-          ok: false,
-          error: `cursor tenantId ${cursorTenantId} not in active PHX tenants`,
-        },
-        { status: 400 },
-      );
-    }
-  } else {
-    tenant = tenants[0];
-  }
-
-  // Reset only when explicitly asked via ?reset=1 — otherwise we'd wipe
-  // an in-progress day every time someone re-kicks the chain externally.
-  // Without reset, the dedupe marker + per-store rows persist and new
-  // chunks merge additively. backfillRevenueForRange loads the seen-set
-  // automatically and skips already-processed customers.
-  const wantsReset = sp.get("reset") === "1";
-
   const startedAt = Date.now();
-  const validStatuses = ["Active", "Canceled", "Never Enrolled"] as const;
-  const startStatus =
-    cursorStartStatus &&
-    (validStatuses as readonly string[]).includes(cursorStartStatus)
-      ? (cursorStartStatus as (typeof validStatuses)[number])
-      : undefined;
+  const tenantResults: Array<Record<string, unknown>> = [];
 
-  const result = await backfillRevenueForRange({
-    tenantId: tenant.id,
-    from: day,
-    to: day,
-    startStatus,
-    startPage: cursorStartPage,
-    reset: wantsReset,
-    maxCustomers: CHUNK_MAX_CUSTOMERS,
-    throttleMs: 75,
-    deadlineMs: CHUNK_DEADLINE_MS,
-    persist: true,
-  });
+  // Process tenants serially. Within each tenant, loop chunks until that
+  // tenant's day is finished or our wall budget runs out. backfillRevenue-
+  // ForRange handles cursor + dedupe internally, so each iteration just
+  // hands it the previous response's cursor.
+  for (const tenant of tenants) {
+    if (Date.now() - startedAt >= TOTAL_BUDGET_MS) break;
 
-  const p = result.progress;
-  const elapsedMs = Date.now() - startedAt;
+    let chunks = 0;
+    let totalSeen = 0;
+    let totalWithTx = 0;
+    let lastNextStatus: string | null = null;
+    let lastNextPage: number | null = null;
+    let finished = false;
+    // First chunk for this tenant on this day's fire is allowed to start
+    // from the top — backfillRevenueForRange's seenCustomers load makes
+    // it cheap to re-walk past previously processed customers.
+    let startStatus: "Active" | "Canceled" | "Never Enrolled" | undefined;
+    let startPage: number | undefined;
 
-  let nextStep: "same-tenant" | "next-tenant" | "complete";
-  let scheduled: string | null = null;
-  if (!p.finished) {
-    nextStep = "same-tenant";
-    const url = buildSelfUrl(req, {
-      date: day,
-      tenantId: tenant.id,
-      startStatus: p.nextStatus,
-      startPage: p.nextPage,
-    });
-    scheduleNext(req, url);
-    scheduled = url;
-  } else {
-    const idx = tenants.findIndex((t) => t.id === tenant.id);
-    const nextTenant = tenants[idx + 1];
-    if (nextTenant) {
-      nextStep = "next-tenant";
-      const url = buildSelfUrl(req, { date: day, tenantId: nextTenant.id });
-      scheduleNext(req, url);
-      scheduled = url;
-    } else {
-      nextStep = "complete";
+    while (Date.now() - startedAt < TOTAL_BUDGET_MS) {
+      const result = await backfillRevenueForRange({
+        tenantId: tenant.id,
+        from: day,
+        to: day,
+        startStatus,
+        startPage,
+        // Reset is opt-in via ?reset=1 only — daily fires must not wipe
+        // accumulated progress.
+        reset: false,
+        maxCustomers: CHUNK_MAX_CUSTOMERS,
+        throttleMs: 75,
+        deadlineMs: CHUNK_DEADLINE_MS,
+        persist: true,
+      });
+      const p = result.progress;
+      chunks += 1;
+      totalSeen += p.customersSeen;
+      totalWithTx += p.customersWithTx;
+      lastNextStatus = p.nextStatus;
+      lastNextPage = p.nextPage;
+      if (p.finished) {
+        finished = true;
+        break;
+      }
+      if (p.nextStatus == null || p.nextPage == null) break;
+      startStatus = p.nextStatus;
+      startPage = p.nextPage;
     }
+
+    tenantResults.push({
+      tenant: tenant.display_name,
+      finished,
+      chunks,
+      customersSeen: totalSeen,
+      customersWithTx: totalWithTx,
+      nextStatus: finished ? null : lastNextStatus,
+      nextPage: finished ? null : lastNextPage,
+    });
   }
 
   return Response.json({
     ok: true,
     day,
-    tenant: tenant.display_name,
-    chunk: {
-      elapsedMs,
-      finished: p.finished,
-      customersSeen: p.customersSeen,
-      customersWithTx: p.customersWithTx,
-      customersSkippedDup: p.customersSkippedDup,
-      nextStatus: p.nextStatus,
-      nextPage: p.nextPage,
-    },
-    perStoreTotals: result.perStoreTotals,
-    nextStep,
-    scheduledNext: scheduled,
+    elapsedMs: Date.now() - startedAt,
+    tenantResults,
   });
 }
 
