@@ -9,6 +9,8 @@ import {
 } from "@/components/settings/CredentialCard";
 import {
   pingChargeblastAction,
+  pingShopifyStoreAction,
+  pingSolvpathAction,
   syncChargeblastAction,
   saveChargeblastAction,
   saveSolvpathAction,
@@ -66,6 +68,13 @@ export default async function IntegrationsSettingsPage({
     cb_upserted?: string;
     cb_save?: string;
     sp_save?: string;
+    sp_test?: string;
+    sp_total?: string;
+    sp_msg?: string;
+    sh_test?: string;
+    sh_code?: string;
+    sh_name?: string;
+    sh_msg?: string;
     zb_save?: string;
   }>;
 }) {
@@ -149,6 +158,30 @@ export default async function IntegrationsSettingsPage({
           Solvpath credentials saved.
         </div>
       ) : null}
+      {params.sp_test === "ok" ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Solvpath reachable · {params.sp_total} stores visible.
+        </div>
+      ) : null}
+      {params.sp_test === "fail" ? (
+        <div className="inline-banner banner-neg">
+          <AlertCircle size={14} strokeWidth={2} />
+          Solvpath ping failed: {params.sp_msg ?? "unknown error"}
+        </div>
+      ) : null}
+      {params.sh_test === "ok" ? (
+        <div className="inline-banner banner-pos">
+          <CheckCircle2 size={14} strokeWidth={2} />
+          Shopify {params.sh_code} reachable · shop name “{params.sh_name}”.
+        </div>
+      ) : null}
+      {params.sh_test === "fail" ? (
+        <div className="inline-banner banner-neg">
+          <AlertCircle size={14} strokeWidth={2} />
+          Shopify {params.sh_code} ping failed: {params.sh_msg ?? "unknown error"}
+        </div>
+      ) : null}
       {params.zb_save ? (
         <div className="inline-banner banner-pos">
           <CheckCircle2 size={14} strokeWidth={2} />
@@ -203,7 +236,23 @@ export default async function IntegrationsSettingsPage({
               label="Webhook secret (svix)"
               hasSaved={integrationStatus.chargeblast.fields.includes("webhookSecret")}
             />
-            <SaveButton />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <SaveButton />
+              <button
+                type="submit"
+                formAction={pingChargeblastAction}
+                className="ghost-btn"
+                disabled={!integrationStatus.chargeblast.fields.includes("apiKey")}
+                title={
+                  integrationStatus.chargeblast.fields.includes("apiKey")
+                    ? "Pings /alerts using saved API key"
+                    : "Save API key first"
+                }
+              >
+                <Zap size={13} strokeWidth={2} />
+                Test
+              </button>
+            </div>
           </form>
 
           {/* Solvpath / PHX credentials */}
@@ -248,7 +297,32 @@ export default async function IntegrationsSettingsPage({
                 />
               </div>
             </label>
-            <SaveButton />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <SaveButton />
+              <button
+                type="submit"
+                formAction={pingSolvpathAction}
+                className="ghost-btn"
+                disabled={!integrationStatus.solvpath.configured}
+                title={
+                  integrationStatus.solvpath.configured
+                    ? "Pings /stores using saved credentials"
+                    : "Save credentials first"
+                }
+              >
+                <Zap size={13} strokeWidth={2} />
+                Test
+              </button>
+            </div>
+            {!process.env.VERCEL ? (
+              <div
+                className="section-sub"
+                style={{ fontSize: 11, color: "var(--muted)" }}
+              >
+                Solvpath has an IP allowlist — ping only succeeds from the
+                deployed Vercel app, not localhost.
+              </div>
+            ) : null}
           </form>
 
           {/* Zoho Books org */}
@@ -401,6 +475,18 @@ export default async function IntegrationsSettingsPage({
                       <span className="pill-dot" />
                       {credsSet ? "Connected" : "Needs token"}
                     </span>
+                    {credsSet ? (
+                      <form
+                        action={pingShopifyStoreAction}
+                        style={{ display: "inline" }}
+                      >
+                        <input type="hidden" name="code" value={s.id} />
+                        <button type="submit" className="ghost-btn">
+                          <Zap size={13} strokeWidth={2} />
+                          Test
+                        </button>
+                      </form>
+                    ) : null}
                   </div>
                 </div>
               );

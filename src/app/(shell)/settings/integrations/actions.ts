@@ -4,9 +4,13 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ping } from "@/lib/chargeblast/client";
 import { syncAlerts } from "@/lib/chargeblast/sync";
+import { listStores as listSolvpathStores } from "@/lib/solvpath/client";
+import { ShopifyClient } from "@/lib/shopify/client";
+import { getStoreCreds } from "@/lib/shopify/stores";
 import { requireTenant, ADMIN_ROLES, WRITE_DATA_ROLES } from "@/lib/tenant";
 import {
   getChargeblastCreds,
+  getSolvpathCreds,
   saveChargeblastCreds,
   saveSolvpathCreds,
   saveZohoBooksCreds,
@@ -112,6 +116,56 @@ export async function saveSolvpathAction(formData: FormData) {
   });
   revalidatePath("/settings/integrations");
   redirect("/settings/integrations?sp_save=ok");
+}
+
+/** Lightweight Solvpath reachability check using saved DB creds.
+ *  Solvpath has an IP allowlist — only succeeds from Vercel, not localhost. */
+export async function pingSolvpathAction(): Promise<void> {
+  const tenant = await requireWriter();
+  const creds = await getSolvpathCreds(tenant.id);
+  if (!creds) {
+    redirect(
+      "/settings/integrations?sp_test=fail&sp_msg=Save%20Solvpath%20credentials%20first",
+    );
+  }
+  try {
+    const r = await listSolvpathStores(tenant.id, { Limit: 1, Page: 1 });
+    redirect(`/settings/integrations?sp_test=ok&sp_total=${r.TotalCount}`);
+  } catch (err) {
+    if (err instanceof Error && err.message === "NEXT_REDIRECT") throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    redirect(`/settings/integrations?sp_test=fail&sp_msg=${encode(msg)}`);
+  }
+}
+
+// ── Shopify per-store ───────────────────────────────────────────────────
+
+/** Test a single store's Shopify credentials by hitting the Admin API.
+ *  Uses GraphQL `query { shop { name } }` — same auth path as the cron. */
+export async function pingShopifyStoreAction(formData: FormData): Promise<void> {
+  const tenant = await requireWriter();
+  const code = String(formData.get("code") ?? "").trim().toUpperCase();
+  if (!code) {
+    redirect(
+      "/settings/integrations?sh_test=fail&sh_code=&sh_msg=missing_store_code",
+    );
+  }
+  try {
+    const creds = await getStoreCreds(code, tenant.id);
+    const client = new ShopifyClient(creds);
+    const data = await client.graphql<{
+      shop: { name: string; myshopifyDomain: string };
+    }>(`query { shop { name myshopifyDomain } }`);
+    redirect(
+      `/settings/integrations?sh_test=ok&sh_code=${encode(code)}&sh_name=${encode(data.shop.name)}`,
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message === "NEXT_REDIRECT") throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    redirect(
+      `/settings/integrations?sh_test=fail&sh_code=${encode(code)}&sh_msg=${encode(msg)}`,
+    );
+  }
 }
 
 // ── Zoho ────────────────────────────────────────────────────────────────
