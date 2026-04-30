@@ -3,7 +3,15 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, ADMIN_ROLES } from "@/lib/tenant";
+
+async function requireAdmin() {
+  const tenant = await requireTenant();
+  if (!ADMIN_ROLES.includes(tenant.role)) {
+    redirect("/settings/team?err=forbidden");
+  }
+  return tenant;
+}
 
 const VALID_ROLES = new Set(["admin", "manager", "viewer"]);
 
@@ -15,7 +23,7 @@ function bad(reason: string): never {
  *  we create a tenant_memberships row directly. Otherwise we drop a
  *  pending_invitations row that the signup trigger consumes. */
 export async function inviteTeammateAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const role = String(formData.get("role") ?? "").trim();
 
@@ -55,7 +63,7 @@ export async function inviteTeammateAction(formData: FormData) {
 }
 
 export async function removeMembershipAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const userId = String(formData.get("user_id") ?? "");
   if (!userId) bad("missing_user");
 
@@ -71,7 +79,7 @@ export async function removeMembershipAction(formData: FormData) {
 }
 
 export async function cancelInvitationAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const inviteId = String(formData.get("invite_id") ?? "");
   if (!inviteId) bad("missing_invite");
 
@@ -87,7 +95,7 @@ export async function cancelInvitationAction(formData: FormData) {
 }
 
 export async function changeRoleAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const userId = String(formData.get("user_id") ?? "");
   const role = String(formData.get("role") ?? "");
   if (!userId) bad("missing_user");

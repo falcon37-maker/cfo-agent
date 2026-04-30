@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ping } from "@/lib/chargeblast/client";
 import { syncAlerts } from "@/lib/chargeblast/sync";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, ADMIN_ROLES, WRITE_DATA_ROLES } from "@/lib/tenant";
 import {
   getChargeblastCreds,
   saveChargeblastCreds,
@@ -16,11 +16,28 @@ function encode(s: string): string {
   return encodeURIComponent(s).slice(0, 200);
 }
 
+async function requireAdmin() {
+  const tenant = await requireTenant();
+  if (!ADMIN_ROLES.includes(tenant.role)) {
+    redirect("/settings/integrations?cb_save=fail&cb_msg=forbidden");
+  }
+  return tenant;
+}
+
+async function requireWriter() {
+  // Test/sync actions don't change settings — managers can run them.
+  const tenant = await requireTenant();
+  if (!WRITE_DATA_ROLES.includes(tenant.role)) {
+    redirect("/settings/integrations?cb_test=fail&cb_msg=forbidden");
+  }
+  return tenant;
+}
+
 // ── Chargeblast ─────────────────────────────────────────────────────────
 
 /** Save (encrypted) Chargeblast credentials for the current tenant. */
 export async function saveChargeblastAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const apiKeyInput = String(formData.get("api_key") ?? "").trim();
   const webhookSecretInput = String(formData.get("webhook_secret") ?? "").trim();
 
@@ -37,7 +54,7 @@ export async function saveChargeblastAction(formData: FormData) {
 }
 
 export async function pingChargeblastAction(): Promise<void> {
-  const tenant = await requireTenant();
+  const tenant = await requireWriter();
   const creds = await getChargeblastCreds(tenant.id);
   if (!creds?.apiKey) {
     redirect(
@@ -55,7 +72,7 @@ export async function pingChargeblastAction(): Promise<void> {
 }
 
 export async function syncChargeblastAction(): Promise<void> {
-  const tenant = await requireTenant();
+  const tenant = await requireWriter();
   const creds = await getChargeblastCreds(tenant.id);
   if (!creds?.apiKey) {
     redirect("/settings/integrations?cb_sync=fail&cb_msg=API%20key%20not%20saved");
@@ -81,7 +98,7 @@ export async function syncChargeblastAction(): Promise<void> {
 // ── Solvpath ────────────────────────────────────────────────────────────
 
 export async function saveSolvpathAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const partnerId = String(formData.get("partner_id") ?? "").trim() || undefined;
   const partnerTokenIn = String(formData.get("partner_token") ?? "").trim();
   const bearerTokenIn = String(formData.get("bearer_token") ?? "").trim();
@@ -100,7 +117,7 @@ export async function saveSolvpathAction(formData: FormData) {
 // ── Zoho ────────────────────────────────────────────────────────────────
 
 export async function saveZohoOrgAction(formData: FormData) {
-  const tenant = await requireTenant();
+  const tenant = await requireAdmin();
   const orgId = String(formData.get("org_id") ?? "").trim() || undefined;
   await saveZohoBooksCreds(tenant.id, { orgId });
   revalidatePath("/settings/integrations");
