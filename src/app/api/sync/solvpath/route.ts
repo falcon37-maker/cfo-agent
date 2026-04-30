@@ -140,6 +140,62 @@ async function handle(request: NextRequest) {
       });
     }
 
+    if (action === "diag") {
+      // Walk N Active subscribers, pull each one's Apr tx window, and report
+      // the cross-product of (customer profile, tx Type, RecurringOrderCount)
+      // so we can decide how to recognize "first subscription sale" rows
+      // that Solvpath labels Type="Direct" instead of Type="Initial".
+      const limit = Number(request.nextUrl.searchParams.get("limit") ?? "20");
+      const status = request.nextUrl.searchParams.get("subStatus") ?? "Active";
+      const startDate =
+        request.nextUrl.searchParams.get("from") ?? "2026-04-10";
+      const out: unknown[] = [];
+      let walked = 0;
+      for await (const cust of iterateCustomers(tenantId, status, 25)) {
+        if (walked >= limit) break;
+        walked += 1;
+        let history;
+        try {
+          history = await getTransactionHistory(
+            tenantId,
+            cust.CustomerId,
+            startDate,
+          );
+        } catch (e) {
+          out.push({
+            customerId: cust.CustomerId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+          continue;
+        }
+        const rows = (history.Result ?? []).filter((tx) => {
+          if (!tx.Date) return false;
+          return tx.Date.slice(0, 10) >= startDate;
+        });
+        out.push({
+          customerId: cust.CustomerId,
+          subStatus: cust.SubscriptionStatus,
+          successOrderId: cust.SuccessOrderId,
+          originalTxDate: cust.OriginalTransactionDate,
+          enrollmentDate: cust.EnrollmentDate,
+          cancelledDate: cust.CancelledSubscriptionDate,
+          tx: rows.map((tx) => ({
+            date: tx.Date,
+            store: storeFromDomain(tx.Domain),
+            type: tx.Type,
+            transactionType: tx.TransactionType,
+            orderId: tx.OrderId,
+            isSuccessOrder: tx.OrderId === cust.SuccessOrderId,
+            recurringOrderCount: tx.RecurringOrderCount,
+            responseCode: tx.ResponseCode,
+            amount: tx.Amount,
+            classified: classifyTransaction(tx),
+          })),
+        });
+      }
+      return Response.json({ ok: true, action, status, startDate, walked, customers: out });
+    }
+
     if (action === "backfill") {
       const from = request.nextUrl.searchParams.get("from") ?? "";
       const to = request.nextUrl.searchParams.get("to") ?? "";
