@@ -316,7 +316,7 @@ export async function backfillRevenueForRange(
         break outer;
       }
 
-      const resp = await listCustomers({
+      const resp = await listCustomers(opts.tenantId, {
         Page: page,
         Limit: PAGE_SIZE,
         SubscriptionStatus: status,
@@ -337,7 +337,7 @@ export async function backfillRevenueForRange(
 
         let history: { Result: SolvpathTransaction[] };
         try {
-          history = await getTransactionHistory(cust.CustomerId, opts.from);
+          history = await getTransactionHistory(opts.tenantId, cust.CustomerId, opts.from);
         } catch {
           continue;
         }

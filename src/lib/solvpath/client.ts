@@ -1,30 +1,38 @@
 // Solvpath (Phoenix CRM) API client.
 //
 // Every request needs FOUR headers:
-//   - partnerId        (SOLVPATH_PARTNER_ID)
-//   - partnerToken     (SOLVPATH_PARTNER_TOKEN)
+//   - partnerId        (per-tenant integrations row, env var fallback)
+//   - partnerToken     (per-tenant integrations row, env var fallback)
 //   - request-id       (fresh UUID per request)
-//   - Authorization    (Bearer SOLVPATH_BEARER_TOKEN)
+//   - Authorization    (Bearer per-tenant or env fallback)
+//
+// Multi-tenant (phase 3): credentials are resolved per tenant via
+// getSolvpathCreds(tenantId) — DB-stored values win over env vars when
+// populated. Joseph's existing env-vars keep working until his
+// integrations row gets populated via Settings → Integrations.
 
-const DEFAULT_BASE = "https://pffe.phoenixtechnologies.io/phxcrm";
+import { getSolvpathCreds } from "@/lib/integrations";
 
-function baseUrl(): string {
-  return (process.env.SOLVPATH_BASE_URL || DEFAULT_BASE).replace(/\/+$/, "");
-}
-
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is not set`);
-  return v;
-}
-
-function authHeaders(): Record<string, string> {
+async function authForTenant(
+  tenantId: string,
+): Promise<{ headers: Record<string, string>; baseUrl: string }> {
+  const creds = await getSolvpathCreds(tenantId);
+  if (!creds) {
+    throw new Error(
+      `Solvpath credentials not configured for tenant ${tenantId}. ` +
+        `Save them in Settings → Integrations or set SOLVPATH_PARTNER_ID / ` +
+        `SOLVPATH_PARTNER_TOKEN / SOLVPATH_BEARER_TOKEN in env.`,
+    );
+  }
   return {
-    partnerId: requireEnv("SOLVPATH_PARTNER_ID"),
-    partnerToken: requireEnv("SOLVPATH_PARTNER_TOKEN"),
-    "request-id": crypto.randomUUID(),
-    Authorization: `Bearer ${requireEnv("SOLVPATH_BEARER_TOKEN")}`,
-    Accept: "application/json",
+    headers: {
+      partnerId: creds.partnerId,
+      partnerToken: creds.partnerToken,
+      "request-id": crypto.randomUUID(),
+      Authorization: `Bearer ${creds.bearerToken}`,
+      Accept: "application/json",
+    },
+    baseUrl: creds.baseUrl.replace(/\/+$/, ""),
   };
 }
 
@@ -34,12 +42,14 @@ function authHeaders(): Record<string, string> {
 const MAX_RETRIES = 2;
 
 async function solvpathRequest<T>(
+  tenantId: string,
   method: "GET" | "POST",
   path: string,
   params?: Record<string, string | number | undefined | null>,
   body?: unknown,
 ): Promise<T> {
-  const url = new URL(baseUrl() + path);
+  const auth = await authForTenant(tenantId);
+  const url = new URL(auth.baseUrl + path);
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v != null) url.searchParams.set(k, String(v));
@@ -49,8 +59,11 @@ async function solvpathRequest<T>(
   let lastText = "";
   let lastStatus = 0;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    // Fresh headers each attempt so request-id is unique per retry.
-    const headers = authHeaders();
+    // Fresh request-id per attempt; partner/bearer creds stay constant.
+    const headers: Record<string, string> = {
+      ...auth.headers,
+      "request-id": crypto.randomUUID(),
+    };
     const init: RequestInit = { method, headers, cache: "no-store" };
     if (body != null) {
       headers["Content-Type"] = "application/json";
@@ -81,10 +94,11 @@ async function solvpathRequest<T>(
 }
 
 async function solvpathGet<T>(
+  tenantId: string,
   path: string,
   params?: Record<string, string | number | undefined | null>,
 ): Promise<T> {
-  return solvpathRequest<T>("GET", path, params);
+  return solvpathRequest<T>(tenantId, "GET", path, params);
 }
 
 // ─── Types (from docs) ──────────────────────────────────────────────────────
@@ -135,20 +149,24 @@ export type SolvpathTransaction = {
 
 // ─── Endpoint wrappers ──────────────────────────────────────────────────────
 export async function listStores(
+  tenantId: string,
   params: { Page?: number; Limit?: number } = {},
 ): Promise<SolvpathListResponse<SolvpathStore>> {
-  return solvpathGet("/stores", {
+  return solvpathGet(tenantId, "/stores", {
     Limit: params.Limit ?? 100,
     Page: params.Page ?? 1,
   });
 }
 
-export async function listCustomers(params: {
-  Page?: number;
-  Limit?: number;
-  SubscriptionStatus?: string;
-}): Promise<SolvpathListResponse<SolvpathCustomer>> {
-  return solvpathGet("/customers", {
+export async function listCustomers(
+  tenantId: string,
+  params: {
+    Page?: number;
+    Limit?: number;
+    SubscriptionStatus?: string;
+  },
+): Promise<SolvpathListResponse<SolvpathCustomer>> {
+  return solvpathGet(tenantId, "/customers", {
     Limit: params.Limit ?? 250,
     Page: params.Page ?? 1,
     SubscriptionStatus: params.SubscriptionStatus,
@@ -156,10 +174,11 @@ export async function listCustomers(params: {
 }
 
 export async function getTransactionHistory(
+  tenantId: string,
   customerId: number,
   startDateTime?: string,
 ): Promise<{ Result: SolvpathTransaction[] }> {
-  return solvpathGet("/transaction-history", {
+  return solvpathGet(tenantId, "/transaction-history", {
     CustomerId: customerId,
     StartDateTime: startDateTime,
   });
@@ -170,12 +189,13 @@ export async function getTransactionHistory(
  * customer at a time. Safer than eagerly materializing 10k+ records.
  */
 export async function* iterateCustomers(
+  tenantId: string,
   subscriptionStatus?: string,
   pageSize = 250,
 ): AsyncGenerator<SolvpathCustomer> {
   let page = 1;
   while (true) {
-    const resp = await listCustomers({
+    const resp = await listCustomers(tenantId, {
       Page: page,
       Limit: pageSize,
       SubscriptionStatus: subscriptionStatus,

@@ -57,23 +57,30 @@ async function handle(request: NextRequest) {
   }
   if (!authorized(request)) return unauthorized();
 
-  const missing = [
-    "SOLVPATH_PARTNER_ID",
-    "SOLVPATH_PARTNER_TOKEN",
-    "SOLVPATH_BEARER_TOKEN",
-  ].filter((k) => !process.env[k]);
-  if (missing.length) {
-    return Response.json(
-      { error: `Solvpath env not configured: ${missing.join(", ")}` },
-      { status: 503 },
-    );
+  // Resolve tenant for the call. Solvpath client now reads creds per-tenant
+  // (DB-stored, env-var fallback). With a single active tenant we default
+  // to it; otherwise the caller must pass ?tenantId=<uuid>.
+  const explicitTenantId = request.nextUrl.searchParams.get("tenantId");
+  let tenantId = explicitTenantId ?? null;
+  if (!tenantId) {
+    const tenants = await listActiveTenants();
+    if (tenants.length === 1) tenantId = tenants[0].id;
+    else
+      return Response.json(
+        {
+          error:
+            "Multiple active tenants — pass ?tenantId=<uuid> to disambiguate.",
+          tenants: tenants.map((t) => ({ id: t.id, name: t.display_name })),
+        },
+        { status: 400 },
+      );
   }
 
   const action = request.nextUrl.searchParams.get("action") ?? "ping";
 
   try {
     if (action === "ping") {
-      const stores = await listStores({ Limit: 25, Page: 1 });
+      const stores = await listStores(tenantId, { Limit: 25, Page: 1 });
       return Response.json({
         ok: true,
         action,
@@ -95,7 +102,7 @@ async function handle(request: NextRequest) {
       if (!customerId) {
         // Grab the first customer from the first non-empty status page.
         for (const status of ["Active", "Cancelled", "Paused"]) {
-          for await (const c of iterateCustomers(status, 25)) {
+          for await (const c of iterateCustomers(tenantId, status, 25)) {
             customerId = c.CustomerId;
             break;
           }
@@ -107,7 +114,7 @@ async function handle(request: NextRequest) {
       }
       const startDate =
         request.nextUrl.searchParams.get("from") ?? "2026-04-01";
-      const history = await getTransactionHistory(customerId, startDate);
+      const history = await getTransactionHistory(tenantId, customerId, startDate);
       const rows = history.Result ?? [];
       const annotated = rows.slice(0, 20).map((tx) => ({
         date: tx.Date,
