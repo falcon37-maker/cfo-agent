@@ -92,7 +92,21 @@ export type TxClassification =
   | { refundOrVoid: true; amount: number }
   | null;
 
-export function classifyTransaction(tx: SolvpathTransaction): TxClassification {
+/** Optional customer context. Solvpath labels first-time subscription
+ *  enrollment as Type="Direct" — the only way to tell that tx apart from
+ *  a one-off non-subscription sale is to compare tx.OrderId against the
+ *  customer's SuccessOrderId (the order Solvpath records as creating the
+ *  subscription). When this context is passed and the match holds for a
+ *  subscriber (Active/Canceled), the tx is rebucketed from direct → initial. */
+export type ClassifyContext = {
+  successOrderId?: number;
+  subscriptionStatus?: string;
+};
+
+export function classifyTransaction(
+  tx: SolvpathTransaction,
+  ctx?: ClassifyContext,
+): TxClassification {
   const raw = Number(tx.Amount ?? 0);
   if (!Number.isFinite(raw) || raw <= 0) return null;
 
@@ -107,13 +121,27 @@ export function classifyTransaction(tx: SolvpathTransaction): TxClassification {
 
   const type = (tx.Type || "").toLowerCase();
   const isRebill = (tx.RecurringOrderCount ?? 0) > 0;
+  const isSubscriber =
+    ctx?.subscriptionStatus === "Active" ||
+    ctx?.subscriptionStatus === "Canceled";
+  const isEnrollmentOrder =
+    typeof ctx?.successOrderId === "number" &&
+    tx.OrderId === ctx.successOrderId;
 
   // Match on Type first since it's the explicit label; fall back to
   // RecurringOrderCount for rows that left Type blank.
   if (type.includes("salvage")) return { bucket: "salvage", amount: raw };
   if (type.includes("upsell")) return { bucket: "upsell", amount: raw };
   if (type.includes("initial")) return { bucket: "initial", amount: raw };
-  if (type.includes("direct")) return { bucket: "direct", amount: raw };
+  if (type.includes("direct")) {
+    // Re-bucket a subscriber's enrollment-order Direct sale as initial —
+    // confirmed via /api/sync/solvpath?action=diag: every fresh Active
+    // subscriber's tx came back as Type="Direct" with OrderId === SuccessOrderId.
+    if (isSubscriber && isEnrollmentOrder) {
+      return { bucket: "initial", amount: raw };
+    }
+    return { bucket: "direct", amount: raw };
+  }
   if (type.includes("recurring") || isRebill) return { bucket: "recurring", amount: raw };
 
   return null; // unrecognized — caller can log via unknownTypes
@@ -370,7 +398,10 @@ export async function backfillRevenueForRange(
           const dayStore = dayBuckets[store];
           const totalStore = perStoreTotals[store];
 
-          const cls = classifyTransaction(tx);
+          const cls = classifyTransaction(tx, {
+            successOrderId: cust.SuccessOrderId,
+            subscriptionStatus: cust.SubscriptionStatus,
+          });
           if (!cls) {
             const key = (tx.Type || "(blank)").trim();
             const amt = Number(tx.Amount ?? 0);

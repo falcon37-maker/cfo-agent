@@ -189,7 +189,10 @@ async function handle(request: NextRequest) {
             recurringOrderCount: tx.RecurringOrderCount,
             responseCode: tx.ResponseCode,
             amount: tx.Amount,
-            classified: classifyTransaction(tx),
+            classified: classifyTransaction(tx, {
+              successOrderId: cust.SuccessOrderId,
+              subscriptionStatus: cust.SubscriptionStatus,
+            }),
           })),
         });
       }
