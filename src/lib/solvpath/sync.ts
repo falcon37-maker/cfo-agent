@@ -581,15 +581,17 @@ async function persistSeenCustomers(
 ): Promise<void> {
   if (ids.size === 0) return;
   const sb = supabaseAdmin();
-  const now = new Date();
+  // scrape_date = range_from (start of the dedupe window) so audits-by-
+  // scrape_date land on a meaningful date instead of "whichever day we
+  // last touched the marker".
   const { error } = await sb.from("phx_summary_snapshots").upsert(
     {
       tenant_id: tenantId,
       store_id: BACKFILL_DEDUPE_STORE_ID,
       range_from: from,
       range_to: to,
-      scrape_date: now.toISOString().slice(0, 10),
-      scraped_at: now.toISOString(),
+      scrape_date: from,
+      scraped_at: new Date().toISOString(),
       raw_json: { customerIds: [...ids].sort((a, b) => a - b) },
     },
     { onConflict: "store_id,range_from,range_to" },
@@ -662,16 +664,18 @@ async function mergePerDaySnapshots(
     byKey.set(`${r.store_id}|${r.range_from}`, r);
   }
 
-  const now = new Date();
-  const scrape_date = now.toISOString().slice(0, 10);
-  const scraped_at = now.toISOString();
+  // scrape_date is the calendar date the row's data is FOR (== range_from for
+  // per-day rows). scraped_at keeps the wall-clock timestamp of when we wrote
+  // the row. Earlier this was scrape_date = today, which made audits-by-
+  // scrape_date misleading (every row collapsed onto the day the backfill ran).
+  const scraped_at = new Date().toISOString();
 
   const rows = keys.map(({ store, date }) => ({
     ...mergeDayRow(
       byKey.get(`${store}|${date}`),
       store,
       date,
-      scrape_date,
+      date,
       scraped_at,
       perDayPerStore.get(date)![store],
       meta,
