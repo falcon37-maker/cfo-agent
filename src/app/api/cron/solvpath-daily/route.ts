@@ -14,7 +14,11 @@
 // loadSeenCustomers / persistSeenCustomers in src/lib/solvpath/sync).
 
 import { NextRequest } from "next/server";
-import { backfillRevenueForRange } from "@/lib/solvpath/sync";
+import { listCustomers } from "@/lib/solvpath/client";
+import {
+  backfillRevenueForRange,
+  SUBSCRIBER_STATUSES,
+} from "@/lib/solvpath/sync";
 import { listActiveTenants, type Tenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -154,6 +158,43 @@ async function handle(req: NextRequest) {
       startPage = p.nextPage;
     }
 
+    // Refresh the PORTFOLIO row that powers the dashboard's Subscription
+    // Engine cards. Three quick (Limit=1) calls — each returns TotalCount
+    // for one SubscriptionStatus. Cheap relative to the per-day backfill.
+    let portfolio: Record<string, number> | { error: string } | null = null;
+    try {
+      const counts: Record<string, number> = {};
+      for (const status of SUBSCRIBER_STATUSES) {
+        const r = await listCustomers(tenant.id, {
+          Page: 1,
+          Limit: 1,
+          SubscriptionStatus: status,
+        });
+        counts[status] = r.TotalCount ?? 0;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const { error: pErr } = await supabaseAdmin()
+        .from("phx_summary_snapshots")
+        .upsert(
+          {
+            tenant_id: tenant.id,
+            store_id: "PORTFOLIO",
+            range_from: today,
+            range_to: today,
+            scrape_date: today,
+            scraped_at: new Date().toISOString(),
+            active_subscribers: counts["Active"] ?? 0,
+            cancelled_subscribers: counts["Canceled"] ?? 0,
+            subscribers_in_salvage: null,
+            raw_json: { source: "cron.solvpath-daily", counts },
+          },
+          { onConflict: "store_id,range_from,range_to" },
+        );
+      portfolio = pErr ? { error: pErr.message } : counts;
+    } catch (e) {
+      portfolio = { error: e instanceof Error ? e.message : String(e) };
+    }
+
     tenantResults.push({
       tenant: tenant.display_name,
       finished,
@@ -162,6 +203,7 @@ async function handle(req: NextRequest) {
       customersWithTx: totalWithTx,
       nextStatus: finished ? null : lastNextStatus,
       nextPage: finished ? null : lastNextPage,
+      portfolio,
     });
   }
 

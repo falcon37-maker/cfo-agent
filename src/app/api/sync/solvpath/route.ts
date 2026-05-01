@@ -16,6 +16,7 @@ import { NextRequest } from "next/server";
 import {
   getTransactionHistory,
   iterateCustomers,
+  listCustomers,
   listStores,
 } from "@/lib/solvpath/client";
 import {
@@ -26,6 +27,7 @@ import {
   type SubscriberStatus,
 } from "@/lib/solvpath/sync";
 import { listActiveTenants } from "@/lib/tenant";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,6 +93,59 @@ async function handle(request: NextRequest) {
           DomainUrl: s.DomainUrl,
           Type: s.Type,
         })),
+      });
+    }
+
+    if (action === "portfolio-snapshot") {
+      // Refresh the PORTFOLIO row that powers the dashboard's Subscription
+      // Engine cards. The /transaction-history backfill writes per-store
+      // revenue but NOT subscriber counts — those come from /customers'
+      // TotalCount per status. One quick (Limit=1) call per status.
+      const today = new Date().toISOString().slice(0, 10);
+      const counts: Record<string, number> = {};
+      for (const status of SUBSCRIBER_STATUSES) {
+        const r = await listCustomers(tenantId, {
+          Page: 1,
+          Limit: 1,
+          SubscriptionStatus: status,
+        });
+        counts[status] = r.TotalCount ?? 0;
+      }
+
+      const sb = supabaseAdmin();
+      const { error } = await sb.from("phx_summary_snapshots").upsert(
+        {
+          tenant_id: tenantId,
+          store_id: "PORTFOLIO",
+          range_from: today,
+          range_to: today,
+          scrape_date: today,
+          scraped_at: new Date().toISOString(),
+          active_subscribers: counts["Active"] ?? 0,
+          cancelled_subscribers: counts["Canceled"] ?? 0,
+          // Solvpath has no "Salvage" SubscriptionStatus — that column is
+          // populated by the Phoenix dashboard scraper. Leave null here so
+          // the Subscription Engine card falls back to "—" instead of
+          // showing a misleading 0.
+          subscribers_in_salvage: null,
+          raw_json: {
+            source: "solvpath.portfolio-snapshot",
+            counts,
+          },
+        },
+        { onConflict: "store_id,range_from,range_to" },
+      );
+      if (error) {
+        return Response.json(
+          { ok: false, error: error.message },
+          { status: 500 },
+        );
+      }
+      return Response.json({
+        ok: true,
+        action,
+        date: today,
+        counts,
       });
     }
 
