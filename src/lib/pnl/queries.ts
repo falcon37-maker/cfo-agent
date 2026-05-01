@@ -481,7 +481,15 @@ export async function loadBlendedDashboardData(
       phx_revenue: round2(phx.total),
       phx_net_contribution: round2(phxContribution),
       phx_subs_billed: phx.subsBilledCount,
-      phx_frontend_revenue: round2(phx.frontend),
+      // Frontend = Shopify checkout revenue for PHX stores (one-time +
+      // subscription-enrollment dollars). Pre-classifier-fix this came
+      // from PHX revenue_direct, which lumped both kinds together; now
+      // enrollments correctly land in revenue_initial and revenue_direct
+      // is near zero, so we read the Shopify-side number directly. Total
+      // Revenue still uses phx.total (Solvpath as source of truth) so
+      // there's no double-count at the total level — just the same
+      // enrollment dollars surfacing in both Frontend and Subs columns.
+      phx_frontend_revenue: round2(phxShop.revenue),
       phx_subs_revenue: round2(phx.subs),
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manual),
@@ -517,7 +525,7 @@ export async function loadBlendedDashboardData(
       phx_revenue: round2(phx.total),
       phx_net_contribution: round2(phxContribution),
       phx_subs_billed: phx.subsBilledCount,
-      phx_frontend_revenue: round2(phx.frontend),
+      phx_frontend_revenue: round2(phxShop.revenue),
       phx_subs_revenue: round2(phx.subs),
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manualP),
