@@ -45,8 +45,29 @@ export class ForbiddenError extends Error {
 /** Resolve the current tenant for the in-flight request — opens an SSR
  *  Supabase client off the cookie store, reads auth.getUser(), and looks
  *  up the matching tenants row. Use this from Server Components, Server
- *  Actions, and Route Handlers that run in a request context. */
+ *  Actions, and Route Handlers that run in a request context.
+ *
+ *  Dev-only test bypass: when NODE_ENV !== "production" AND the request
+ *  carries an `x-test-user-id` header matching CFO_TEST_BYPASS_SECRET,
+ *  we skip the Supabase cookie lookup and resolve the tenant for that
+ *  user id directly. Used by scripts/test-edit-100.mjs to drive the
+ *  HTTP endpoints without a browser session. Production never enters
+ *  this branch — both checks must pass. */
 export async function requireTenant(): Promise<ResolvedTenant> {
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      const { headers } = await import("next/headers");
+      const h = await headers();
+      const testUser = h.get("x-test-user-id");
+      const testSecret = h.get("x-test-secret");
+      const expectedSecret = process.env.CFO_TEST_BYPASS_SECRET;
+      if (testUser && testSecret && expectedSecret && testSecret === expectedSecret) {
+        return getTenantForUser(testUser);
+      }
+    } catch {
+      // headers() unavailable outside request scope — fall through.
+    }
+  }
   const ssr = await createSupabaseServerClient();
   return getCurrentTenant(ssr);
 }

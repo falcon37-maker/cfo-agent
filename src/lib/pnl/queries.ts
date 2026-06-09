@@ -34,7 +34,15 @@ export type DailyRow = {
   gross_profit: number;
   net_profit: number;
   margin_pct: number;
+  // Shopify storefront orders only (matches what `shopify_orders` table
+  // returns + what the expand panel shows). PHX subscription rebills are
+  // counted separately so the parent row and expand panel agree.
   order_count: number;
+  // PHX subscription billing events (initial + recurring + salvage +
+  // upsell) for the same date. These don't have individual rows in the
+  // expand panel because they happen outside Shopify, but they're tracked
+  // so the dashboard can surface "+27 subs" alongside the Shopify count.
+  phx_order_count: number;
 };
 
 export type Totals = {
@@ -699,14 +707,23 @@ export async function loadPnlLedger(
   const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
   const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter, tenantId);
 
-  // Subs Rev = Initial + Recurring + Salvage. Initial transactions are
-  // PHX-only — they don't flow through Shopify checkout — so including them
-  // here doesn't double-count anything in daily_pnl.revenue. PHX "Direct"
-  // (one-time, non-subscription) is the only thing that overlaps with
-  // Shopify, and that stays out of subs.
-  const phxSubsByDate = new Map<
+  // Per-day PHX contribution split into two buckets:
+  //   subs   = Initial + Recurring + Salvage  → goes into "subs revenue"
+  //   upsell = revenue_upsell                 → goes into "frontend revenue"
+  //
+  // Why this split: client spec (May 2026 meeting) — upsell is an
+  // at-checkout add-on rung up alongside the first Shopify purchase, so
+  // it belongs with Direct/Frontend revenue, NOT with the subscription
+  // cycle. The dashboard blender (BlendedPnlTable) already does this; we
+  // mirror it here so the simpler /pnl and AI-tool numbers stay consistent.
+  //
+  // Initial / Recurring / Salvage are PHX-only — they don't flow through
+  // Shopify checkout — so adding them on top of daily_pnl.revenue doesn't
+  // double-count. PHX "Direct" is one-time non-subscription and is already
+  // captured by Shopify, so it stays out of the subs bucket here.
+  const phxByDate = new Map<
     string,
-    { revenue: number; orders: number }
+    { subs: number; upsell: number; subOrders: number; upsellOrders: number }
   >();
   for (const r of phxRows) {
     if (!r.range_from || r.range_from !== r.range_to) continue;
@@ -714,15 +731,21 @@ export async function loadPnlLedger(
       Number(r.revenue_initial ?? 0) +
       Number(r.revenue_recurring ?? 0) +
       Number(r.revenue_salvage ?? 0);
+    const upsell = Number(r.revenue_upsell ?? 0);
     const j = (r.raw_json as Record<string, unknown> | null) ?? {};
     const subOrders =
       Number(j.initialCount ?? 0) +
       Number(j.recurringCount ?? 0) +
       Number(j.salvageCount ?? 0);
-    const cur = phxSubsByDate.get(r.range_from) ?? { revenue: 0, orders: 0 };
-    cur.revenue += subs;
-    cur.orders += subOrders;
-    phxSubsByDate.set(r.range_from, cur);
+    const upsellOrders = Number(j.upsellCount ?? 0);
+    const cur =
+      phxByDate.get(r.range_from) ??
+      { subs: 0, upsell: 0, subOrders: 0, upsellOrders: 0 };
+    cur.subs += subs;
+    cur.upsell += upsell;
+    cur.subOrders += subOrders;
+    cur.upsellOrders += upsellOrders;
+    phxByDate.set(r.range_from, cur);
   }
 
   const feeRate =
@@ -733,24 +756,36 @@ export async function loadPnlLedger(
   const ordered = Object.keys(byDate).sort().reverse();
   const ledger: DailyRow[] = ordered.map((d) => {
     const base = aggregate(byDate[d]);
-    const subs = phxSubsByDate.get(d);
-    if (!subs || subs.revenue === 0) return base;
-    // Subs add to revenue. Net profit picks up subs * (1 − fee_rate); the
-    // store's Shopify-side ad_spend / cogs / fees / refunds were already
-    // baked into base.net_profit by the aggregator.
-    const subsContribution = subs.revenue * (1 - feeRate);
-    const totalRev = base.revenue + subs.revenue;
+    const phx = phxByDate.get(d);
+    if (!phx || phx.subs + phx.upsell === 0) return base;
+    // PHX dollars add to revenue. Net profit picks up the PHX revenue
+    // × (1 − fee_rate); the store's Shopify-side ad_spend / cogs / fees /
+    // refunds were already baked into base.net_profit by the aggregator.
+    //
+    // Splits per client spec:
+    //   - upsell rolls into frontend revenue (base.revenue)
+    //   - subs (Initial + Recurring + Salvage) is its own bucket
+    const phxRevenue = phx.subs + phx.upsell;
+    const phxContribution = phxRevenue * (1 - feeRate);
+    const frontend = base.revenue + phx.upsell;
+    const totalRev = frontend + phx.subs;
     return {
       ...base,
-      subs_revenue: subs.revenue,
+      revenue: frontend,
+      subs_revenue: phx.subs,
       total_revenue: totalRev,
-      // PHX rebills + salvage hit Solvpath but never the Shopify storefront,
-      // so they're additive to Shopify's order_count.
-      order_count: base.order_count + subs.orders,
-      net_profit: base.net_profit + subsContribution,
-      gross_profit: base.gross_profit + subs.revenue,
+      // Keep order_count = Shopify orders only so the parent ledger row's
+      // count matches what the expand panel returns from shopify_orders.
+      // PHX subscription order count (subs + upsell) is surfaced as a
+      // separate field that the UI can display alongside (e.g. "40 +27").
+      order_count: base.order_count,
+      phx_order_count: phx.subOrders + phx.upsellOrders,
+      net_profit: base.net_profit + phxContribution,
+      gross_profit: base.gross_profit + phxRevenue,
       margin_pct:
-        totalRev > 0 ? ((base.net_profit + subsContribution) / totalRev) * 100 : 0,
+        totalRev > 0
+          ? ((base.net_profit + phxContribution) / totalRev) * 100
+          : 0,
     };
   });
 
@@ -830,6 +865,7 @@ function aggregate(rows: RawPnlRow[]): DailyRow {
     net_profit,
     margin_pct,
     order_count: orders,
+    phx_order_count: 0,
   };
 }
 
@@ -903,6 +939,7 @@ function emptyDailyRow(date: string): DailyRow {
     net_profit: 0,
     margin_pct: 0,
     order_count: 0,
+    phx_order_count: 0,
   };
 }
 

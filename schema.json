@@ -1,0 +1,2741 @@
+{
+	"tables": [
+		{
+			"name": "ad_spend_entries",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "date",
+					"type": "date",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "amount",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "submitted_by",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "submitted_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"ad_spend_entries_pkey",
+				"ad_spend_entries_recent_idx",
+				"idx_ad_spend_entries_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				},
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "chargeblast_alerts",
+			"columns": [
+				{
+					"name": "id",
+					"type": "text",
+					"default": null,
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "merchant_descriptor",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "card_brand",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "alert_type",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "amount",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "currency",
+					"type": "text",
+					"default": "'USD'::text",
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "status",
+					"type": "text",
+					"default": null,
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "reason",
+					"type": "text",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "order_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "customer_email",
+					"type": "text",
+					"default": null,
+					"ordinal": 11,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "chargeblast_created_at",
+					"type": "timestamptz",
+					"default": null,
+					"ordinal": 12,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "chargeblast_updated_at",
+					"type": "timestamptz",
+					"default": null,
+					"ordinal": 13,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 14,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 15,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 16,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"chargeblast_alerts_pkey",
+				"idx_chargeblast_alerts_tenant",
+				"idx_chargeblast_created",
+				"idx_chargeblast_status",
+				"idx_chargeblast_store"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				},
+				{
+					"column": "store_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "chat_audit_log",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "session_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 3,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "message_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 4,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "user_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tool_name",
+					"type": "text",
+					"default": null,
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "target_table",
+					"type": "text",
+					"default": null,
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "target_pk",
+					"type": "jsonb",
+					"default": null,
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "jsonb"
+				},
+				{
+					"name": "before_value",
+					"type": "jsonb",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "jsonb"
+				},
+				{
+					"name": "after_value",
+					"type": "jsonb",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "jsonb"
+				},
+				{
+					"name": "status",
+					"type": "text",
+					"default": "'applied'::text",
+					"ordinal": 11,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 12,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"chat_audit_log_pkey",
+				"idx_chat_audit_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				},
+				{
+					"column": "message_id",
+					"on_delete": "SET NULL",
+					"on_update": "NO ACTION",
+					"references": "chat_messages(id)"
+				},
+				{
+					"column": "session_id",
+					"on_delete": "SET NULL",
+					"on_update": "NO ACTION",
+					"references": "chat_sessions(id)"
+				}
+			]
+		},
+		{
+			"name": "chat_messages",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "session_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "role",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "content",
+					"type": "text",
+					"default": "''::text",
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "blocks",
+					"type": "jsonb",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "jsonb"
+				},
+				{
+					"name": "input_tokens",
+					"type": "int4",
+					"default": null,
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "output_tokens",
+					"type": "int4",
+					"default": null,
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "latency_ms",
+					"type": "int4",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "tool_name",
+					"type": "text",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "required_confirmation",
+					"type": "bool",
+					"default": "false",
+					"ordinal": 11,
+					"nullable": false,
+					"sql_type": "boolean"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 12,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"chat_messages_pkey",
+				"idx_chat_messages_session",
+				"idx_chat_messages_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "session_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "chat_sessions(id)"
+				},
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "chat_sessions",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "user_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 3,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "title",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "status",
+					"type": "text",
+					"default": "'open'::text",
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "model",
+					"type": "text",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "input_tokens",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "output_tokens",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "message_count",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 10,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 11,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "last_message_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 12,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"chat_sessions_pkey",
+				"idx_chat_sessions_tenant",
+				"idx_chat_sessions_user"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "cogs_entries",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "date",
+					"type": "date",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "cogs",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "submitted_by",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "submitted_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"cogs_entries_pkey",
+				"cogs_entries_recent_idx",
+				"idx_cogs_entries_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				},
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "daily_ad_spend",
+			"columns": [
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "date",
+					"type": "date",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "platform",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "spend",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "impressions",
+					"type": "int8",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "bigint"
+				},
+				{
+					"name": "clicks",
+					"type": "int8",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "bigint"
+				},
+				{
+					"name": "currency",
+					"type": "text",
+					"default": "'USD'::text",
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "synced_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"daily_ad_spend_date_idx",
+				"daily_ad_spend_pkey",
+				"idx_daily_ad_spend_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"store_id",
+				"date",
+				"platform"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				},
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "daily_orders",
+			"columns": [
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "date",
+					"type": "date",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "order_count",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "unit_count",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "gross_sales",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "discounts",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "refunds",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "shipping",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "tax",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "net_revenue",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 10,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "currency",
+					"type": "text",
+					"default": "'USD'::text",
+					"ordinal": 11,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "synced_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 12,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 13,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"daily_orders_date_idx",
+				"daily_orders_pkey",
+				"idx_daily_orders_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"store_id",
+				"date"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				},
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "daily_pnl",
+			"columns": [
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "date",
+					"type": "date",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "revenue",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "cogs",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "ad_spend",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "shipping_cost",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "fees",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "gross_profit",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "net_profit",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "margin_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "computed_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 11,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "refunds",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 12,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "order_count",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 13,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 14,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"daily_pnl_date_idx",
+				"daily_pnl_pkey",
+				"idx_daily_pnl_tenant"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"store_id",
+				"date"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				},
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "integrations",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "provider",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "credentials",
+					"type": "jsonb",
+					"default": "'{}'::jsonb",
+					"ordinal": 4,
+					"nullable": true,
+					"sql_type": "jsonb"
+				},
+				{
+					"name": "is_active",
+					"type": "bool",
+					"default": "true",
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "boolean"
+				},
+				{
+					"name": "last_synced_at",
+					"type": "timestamptz",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"idx_integrations_tenant",
+				"integrations_pkey",
+				"integrations_tenant_id_provider_key"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "manual_revenue_entries",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "date",
+					"type": "date",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "revenue_type",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "description",
+					"type": "text",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "amount",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "notes",
+					"type": "text",
+					"default": null,
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "created_by",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"idx_manual_revenue_tenant_date",
+				"manual_revenue_entries_pkey"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "pending_invitations",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "email",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "role",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "invited_by",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"idx_pending_invitations_email",
+				"idx_pending_invitations_tenant",
+				"pending_invitations_pkey",
+				"pending_invitations_tenant_id_email_key"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "phx_cohorts",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "cohort_date",
+					"type": "date",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "cohort_size",
+					"type": "int4",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "period",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "active_count",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "retention_rate",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "revenue_to_date",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "avg_ltv",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 10,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"phx_cohorts_date_idx",
+				"phx_cohorts_pkey",
+				"phx_cohorts_store_id_cohort_date_period_key"
+			],
+			"policies": [],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": false,
+			"foreign_keys": [
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "phx_rebills",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "subscriber_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 3,
+					"nullable": true,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "phx_transaction_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "phx_subscriber_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "rebill_date",
+					"type": "date",
+					"default": null,
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "amount",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "status",
+					"type": "text",
+					"default": null,
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "rebill_number",
+					"type": "int4",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "is_vip",
+					"type": "bool",
+					"default": "true",
+					"ordinal": 10,
+					"nullable": false,
+					"sql_type": "boolean"
+				},
+				{
+					"name": "processing_fee",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 11,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "net_revenue",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 12,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 13,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"phx_rebills_date_idx",
+				"phx_rebills_pkey",
+				"phx_rebills_store_id_phx_transaction_id_key",
+				"phx_rebills_sub_idx"
+			],
+			"policies": [],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": false,
+			"foreign_keys": [
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				},
+				{
+					"column": "subscriber_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "phx_subscribers(id)"
+				}
+			]
+		},
+		{
+			"name": "phx_subscribers",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "phx_subscriber_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "email",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "status",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "plan_name",
+					"type": "text",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "bundle_type",
+					"type": "text",
+					"default": null,
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "signup_date",
+					"type": "date",
+					"default": null,
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "date"
+				},
+				{
+					"name": "last_rebill_date",
+					"type": "date",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "date"
+				},
+				{
+					"name": "next_rebill_date",
+					"type": "date",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "date"
+				},
+				{
+					"name": "rebill_amount",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 11,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "total_rebills",
+					"type": "int4",
+					"default": "0",
+					"ordinal": 12,
+					"nullable": false,
+					"sql_type": "integer"
+				},
+				{
+					"name": "total_revenue",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 13,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 14,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 15,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"phx_subscribers_pkey",
+				"phx_subscribers_signup_idx",
+				"phx_subscribers_status_idx",
+				"phx_subscribers_store_id_phx_subscriber_id_key"
+			],
+			"policies": [],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": false,
+			"foreign_keys": [
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "phx_summary_snapshots",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "scrape_date",
+					"type": "date",
+					"default": "((now() AT TIME ZONE 'utc'::text))::date",
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "scraped_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "range_from",
+					"type": "date",
+					"default": null,
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "range_to",
+					"type": "date",
+					"default": null,
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "date"
+				},
+				{
+					"name": "direct_sale_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "direct_sale_success_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "initial_subscription_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 9,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "initial_subscription_success_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "recurring_subscription_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 11,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "recurring_subscription_success_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 12,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "subscription_salvage_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 13,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "subscription_salvage_success_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 14,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "upsell_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 15,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "upsell_success_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 16,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "target_cac",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 17,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "subscriptions_to_bill",
+					"type": "int4",
+					"default": null,
+					"ordinal": 18,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "total_transactions_mtd",
+					"type": "int4",
+					"default": null,
+					"ordinal": 19,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "refunds_mtd_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 20,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "refunds_mtd_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 21,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "chargebacks_mtd_count",
+					"type": "int4",
+					"default": null,
+					"ordinal": 22,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "chargebacks_mtd_pct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 23,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "active_subscribers",
+					"type": "int4",
+					"default": null,
+					"ordinal": 24,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "subscribers_in_salvage",
+					"type": "int4",
+					"default": null,
+					"ordinal": 25,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "cancelled_subscribers",
+					"type": "int4",
+					"default": null,
+					"ordinal": 26,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "revenue_total",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 27,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "revenue_direct",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 28,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "revenue_initial",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 29,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "revenue_recurring",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 30,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "revenue_salvage",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 31,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "revenue_upsell",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 32,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "net_subscribers",
+					"type": "int4",
+					"default": null,
+					"ordinal": 33,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "new_subscribers",
+					"type": "int4",
+					"default": null,
+					"ordinal": 34,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "cancelled_subscribers_period",
+					"type": "int4",
+					"default": null,
+					"ordinal": 35,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "refund_total",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 36,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "refund_agent",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 37,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "refund_ethoca",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 38,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "refund_cdrn",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 39,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "refund_rdr_withdrawals",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 40,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "refund_chargeback_withdrawals",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 41,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "raw_json",
+					"type": "jsonb",
+					"default": null,
+					"ordinal": 42,
+					"nullable": true,
+					"sql_type": "jsonb"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 43,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"idx_phx_summary_snapshots_tenant",
+				"phx_summary_scrape_idx",
+				"phx_summary_snapshots_pkey",
+				"phx_summary_snapshots_store_range_unique"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				},
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "products",
+			"columns": [
+				{
+					"name": "store_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "shopify_variant_id",
+					"type": "int8",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "bigint"
+				},
+				{
+					"name": "shopify_product_id",
+					"type": "int8",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "bigint"
+				},
+				{
+					"name": "sku",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "title",
+					"type": "text",
+					"default": null,
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "variant_title",
+					"type": "text",
+					"default": null,
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "cogs",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "currency",
+					"type": "text",
+					"default": "'USD'::text",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"products_pkey",
+				"products_sku_idx"
+			],
+			"policies": [],
+			"primary_key": [
+				"store_id",
+				"shopify_variant_id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "store_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "stores(id)"
+				}
+			]
+		},
+		{
+			"name": "stores",
+			"columns": [
+				{
+					"name": "id",
+					"type": "text",
+					"default": null,
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "name",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "shop_domain",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "currency",
+					"type": "text",
+					"default": "'USD'::text",
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "timezone",
+					"type": "text",
+					"default": "'America/New_York'::text",
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "is_active",
+					"type": "bool",
+					"default": "true",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "boolean"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "default_cogs_per_order",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "processing_fee_pct",
+					"type": "numeric",
+					"default": "0",
+					"ordinal": 9,
+					"nullable": false,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "chargeblast_descriptor",
+					"type": "text",
+					"default": null,
+					"ordinal": 10,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 11,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "shopify_domain",
+					"type": "text",
+					"default": null,
+					"ordinal": 12,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "shopify_token_encrypted",
+					"type": "text",
+					"default": null,
+					"ordinal": 13,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "shopify_client_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 14,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "shopify_client_secret_encrypted",
+					"type": "text",
+					"default": null,
+					"ordinal": 15,
+					"nullable": true,
+					"sql_type": "text"
+				},
+				{
+					"name": "solvpath_store_code",
+					"type": "int4",
+					"default": null,
+					"ordinal": 16,
+					"nullable": true,
+					"sql_type": "integer"
+				},
+				{
+					"name": "processing_fee_fixed",
+					"type": "numeric",
+					"default": null,
+					"ordinal": 17,
+					"nullable": true,
+					"sql_type": "numeric"
+				},
+				{
+					"name": "store_type",
+					"type": "text",
+					"default": "'shopify'::text",
+					"ordinal": 18,
+					"nullable": true,
+					"sql_type": "text"
+				}
+			],
+			"indexes": [
+				"idx_stores_tenant",
+				"idx_stores_tenant_id_active",
+				"stores_pkey",
+				"stores_shop_domain_key"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "tenant_memberships",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "user_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "role",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				}
+			],
+			"indexes": [
+				"idx_tenant_memberships_tenant",
+				"idx_tenant_memberships_user",
+				"tenant_memberships_pkey",
+				"tenant_memberships_tenant_id_user_id_key"
+			],
+			"policies": [
+				{
+					"name": "membership_self_read",
+					"roles": [
+						"public"
+					],
+					"command": "SELECT"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "CASCADE",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		},
+		{
+			"name": "tenants",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "user_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "display_name",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "email",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 5,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 6,
+					"nullable": true,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "is_active",
+					"type": "bool",
+					"default": "true",
+					"ordinal": 7,
+					"nullable": true,
+					"sql_type": "boolean"
+				},
+				{
+					"name": "settings",
+					"type": "jsonb",
+					"default": "'{}'::jsonb",
+					"ordinal": 8,
+					"nullable": true,
+					"sql_type": "jsonb"
+				}
+			],
+			"indexes": [
+				"idx_tenants_active",
+				"idx_tenants_user_id",
+				"tenants_pkey",
+				"tenants_user_id_key"
+			],
+			"policies": [
+				{
+					"name": "tenant_self_read",
+					"roles": [
+						"public"
+					],
+					"command": "SELECT"
+				},
+				{
+					"name": "tenant_self_update",
+					"roles": [
+						"public"
+					],
+					"command": "UPDATE"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": []
+		},
+		{
+			"name": "zoho_credentials",
+			"columns": [
+				{
+					"name": "id",
+					"type": "uuid",
+					"default": "gen_random_uuid()",
+					"ordinal": 1,
+					"nullable": false,
+					"sql_type": "uuid"
+				},
+				{
+					"name": "org_id",
+					"type": "text",
+					"default": null,
+					"ordinal": 2,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "access_token",
+					"type": "text",
+					"default": null,
+					"ordinal": 3,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "refresh_token",
+					"type": "text",
+					"default": null,
+					"ordinal": 4,
+					"nullable": false,
+					"sql_type": "text"
+				},
+				{
+					"name": "expires_at",
+					"type": "timestamptz",
+					"default": null,
+					"ordinal": 5,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "created_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 6,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "updated_at",
+					"type": "timestamptz",
+					"default": "now()",
+					"ordinal": 7,
+					"nullable": false,
+					"sql_type": "timestamp with time zone"
+				},
+				{
+					"name": "tenant_id",
+					"type": "uuid",
+					"default": null,
+					"ordinal": 8,
+					"nullable": false,
+					"sql_type": "uuid"
+				}
+			],
+			"indexes": [
+				"idx_zoho_credentials_tenant",
+				"zoho_credentials_org_id_key",
+				"zoho_credentials_pkey"
+			],
+			"policies": [
+				{
+					"name": "tenant_isolation",
+					"roles": [
+						"public"
+					],
+					"command": "ALL"
+				}
+			],
+			"primary_key": [
+				"id"
+			],
+			"rls_enabled": true,
+			"foreign_keys": [
+				{
+					"column": "tenant_id",
+					"on_delete": "NO ACTION",
+					"on_update": "NO ACTION",
+					"references": "tenants(id)"
+				}
+			]
+		}
+	],
+	"generated_at": "2026-05-25T15:07:27.020797+00:00"
+}

@@ -2,9 +2,10 @@ import Link from "next/link";
 import { Download } from "lucide-react";
 import { loadPnlLedger } from "@/lib/pnl/queries";
 import { requireTenant } from "@/lib/tenant";
-import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
+import { fmtDate, fmtPct } from "@/lib/format";
 import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { ExpandableLedger } from "@/components/pnl/ExpandableLedger";
 
 export const dynamic = "force-dynamic";
 
@@ -223,102 +224,36 @@ export default async function PnlPage({
             </div>
           </div>
         </div>
-        <div className="table-wrap" style={{ maxHeight: 560 }}>
-          <table className="pnl-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th className="num">Orders</th>
-                <th className="num">Revenue</th>
-                <th className="num">Subs Rev</th>
-                <th className="num">Ad Spend</th>
-                <th className="num">COGS</th>
-                <th className="num">Fees</th>
-                <th className="num">Refunds</th>
-                <th className="num">Gross Profit</th>
-                <th className="num">Net Profit</th>
-                <th className="num">ROAS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const roas = r.ad_spend > 0 ? r.total_revenue / r.ad_spend : 0;
-                return (
-                  <tr key={r.date}>
-                    <td>{fmtDate(r.date)}</td>
-                    <td className="num muted">{fmtInt(r.order_count)}</td>
-                    <td className="num">{fmtMoney(r.revenue)}</td>
-                    <td
-                      className="num"
-                      style={{
-                        color:
-                          r.subs_revenue > 0
-                            ? "var(--accent-dim)"
-                            : "var(--muted-strong)",
-                      }}
-                    >
-                      {r.subs_revenue > 0 ? fmtMoney(r.subs_revenue) : "—"}
-                    </td>
-                    <td className="num muted">{fmtMoney(r.ad_spend)}</td>
-                    <td className="num muted">{fmtMoney(r.cogs)}</td>
-                    <td className="num muted">{fmtMoney(r.fees)}</td>
-                    <td className="num muted">{fmtMoney(r.refunds)}</td>
-                    <td className="num" style={{ color: "var(--text)" }}>
-                      {fmtMoney(r.gross_profit)}
-                    </td>
-                    <td className={`num profit ${r.net_profit >= 0 ? "pos" : "neg"}`}>
-                      <span className="profit-pill">{fmtMoney(r.net_profit)}</span>
-                    </td>
-                    <td
-                      className={`num roas ${r.ad_spend > 0 ? (roas >= 2 ? "pos" : "neg") : ""}`}
-                    >
-                      {r.ad_spend > 0 ? `${roas.toFixed(2)}x` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {rows.length > 0 ? (
-              <tfoot>
-                <tr className="tfoot-row">
-                  <td>Total</td>
-                  <td className="num">{fmtInt(totals.orders)}</td>
-                  <td className="num">{fmtMoney(totals.revenue)}</td>
-                  <td className="num">
-                    {totals.subs_revenue > 0
-                      ? fmtMoney(totals.subs_revenue)
-                      : "—"}
-                  </td>
-                  <td className="num">{fmtMoney(totals.ad_spend)}</td>
-                  <td className="num">{fmtMoney(totals.cogs)}</td>
-                  <td className="num">{fmtMoney(totals.fees)}</td>
-                  <td className="num">{fmtMoney(totals.refunds)}</td>
-                  <td className="num">{fmtMoney(totals.gross_profit)}</td>
-                  <td className={`num profit ${totals.net_profit >= 0 ? "pos" : "neg"}`}>
-                    <span className="profit-pill">{fmtMoney(totals.net_profit)}</span>
-                  </td>
-                  <td
-                    className={`num roas ${totals.ad_spend > 0 ? (totals.roas >= 2 ? "pos" : "neg") : ""}`}
-                  >
-                    {totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
-                  </td>
-                </tr>
-              </tfoot>
-            ) : null}
-          </table>
-          {rows.length === 0 ? (
-            <div
-              style={{
-                padding: 40,
-                textAlign: "center",
-                color: "var(--muted)",
-                fontSize: 12,
-              }}
-            >
-              No data for this range.
-            </div>
-          ) : null}
-        </div>
+        <ExpandableLedger
+          rows={rows.map((r) => ({
+            date: r.date,
+            order_count: r.order_count,
+            phx_order_count: r.phx_order_count,
+            revenue: r.revenue,
+            subs_revenue: r.subs_revenue,
+            ad_spend: r.ad_spend,
+            cogs: r.cogs,
+            fees: r.fees,
+            refunds: r.refunds,
+            gross_profit: r.gross_profit,
+            net_profit: r.net_profit,
+            total_revenue: r.total_revenue,
+          }))}
+          totals={{
+            revenue: totals.revenue,
+            subs_revenue: totals.subs_revenue,
+            ad_spend: totals.ad_spend,
+            cogs: totals.cogs,
+            fees: totals.fees,
+            refunds: totals.refunds,
+            gross_profit: totals.gross_profit,
+            net_profit: totals.net_profit,
+            orders: totals.orders,
+            roas: totals.roas,
+          }}
+          selectedStores={selected}
+          availableStores={stores.map((s) => s.id)}
+        />
       </div>
     </>
   );

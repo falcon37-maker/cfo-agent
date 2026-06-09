@@ -1,15 +1,26 @@
 // Daily sync — triggered by Vercel cron (see vercel.json).
 //
 // For every active non-portfolio store:
-//   1. Pull YESTERDAY's orders from Shopify (in the store's local timezone).
-//      We finalize the just-completed day rather than the still-in-progress
-//      current day; "today" at midnight PST hasn't accumulated any orders yet.
-//   2. Recompute daily_pnl for that (store, date) row.
+//   1. Pull the LAST 3 DAYS of orders from Shopify (in the store's local
+//      timezone) and re-sync each. We use a 3-day window (not 1) so that:
+//        a) Yesterday's data is always finalized (the original target).
+//        b) Day-before-yesterday catches any late refunds / cancellations
+//           Shopify processed after our previous sync.
+//        c) Today's partial data is captured so the dashboard isn't empty
+//           when users log in, AND any cross-midnight boundary order that
+//           was misfiled under yesterday during the previous run gets
+//           corrected automatically.
+//      The colon-quoting fix (see syncDailyOrders) prevents the
+//      half-infinite-window bug that was inflating counts; the 3-day
+//      window is the belt to that suspenders.
+//   2. Recompute daily_pnl for each of those (store, date) rows.
 // Then pulls the last 7 days of Chargeblast alerts — the 7-day window catches
 // both brand-new alerts and status updates (won/lost) on recent alerts.
 //
 // Query params (optional):
-//   - date=YYYY-MM-DD  → sync this exact date for every store (backfill).
+//   - date=YYYY-MM-DD  → sync this exact date for every store (backfill;
+//     overrides the 3-day window).
+//   - days=N           → override the window size (default 3, max 30).
 //
 // Auth: Vercel cron includes an `Authorization: Bearer <CRON_SECRET>` header
 // on every cron-triggered request. Middleware lets /api/cron/* through; this
@@ -35,18 +46,26 @@ function unauthorized() {
   return Response.json({ error: "unauthorized" }, { status: 401 });
 }
 
-/** "Yesterday" in the given timezone, as YYYY-MM-DD. */
-function yesterdayInTz(tz: string): string {
-  const todayLocal = new Intl.DateTimeFormat("en-CA", {
+/** "Today" in the given timezone, as YYYY-MM-DD. */
+function todayInTz(tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const [y, m, d] = todayLocal.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() - 1);
-  return dt.toISOString().slice(0, 10);
+}
+
+/** The last N days (today back to today-N+1) in tz, newest-first. */
+function lastNDaysInTz(tz: string, n: number): string[] {
+  const today = todayInTz(tz);
+  const [y, m, d] = today.split("-").map(Number);
+  const dates: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const dt = new Date(Date.UTC(y, m - 1, d - i));
+    dates.push(dt.toISOString().slice(0, 10));
+  }
+  return dates;
 }
 
 async function handle(request: NextRequest) {
@@ -80,6 +99,14 @@ async function handle(request: NextRequest) {
       ? dateOverride
       : null;
 
+  // ?days=N — override the rolling window size (default 3, max 30).
+  const daysParam = request.nextUrl.searchParams.get("days");
+  const parsedDays = daysParam ? Number(daysParam) : NaN;
+  const windowDays =
+    Number.isFinite(parsedDays) && parsedDays > 0
+      ? Math.min(30, Math.floor(parsedDays))
+      : 3;
+
   const started = Date.now();
   const results: Array<Record<string, unknown>> = [];
   const skipped: Array<{ tenant: string; store: string }> = [];
@@ -101,27 +128,34 @@ async function handle(request: NextRequest) {
         skipped.push({ tenant: tenant.display_name, store: store.id });
         continue;
       }
-      const date = explicit ?? yesterdayInTz(store.timezone ?? "UTC");
-      try {
-        const pull = await syncDailyOrders(store.id, date, tenant.id);
-        const pnl = await computeDailyPnl(store.id, date, tenant.id);
-        results.push({
-          tenant: tenant.display_name,
-          store: store.id,
-          date,
-          ok: true,
-          orderCount: pull.orderCount,
-          grossSales: pull.grossSales,
-          netProfit: pnl?.net_profit ?? null,
-        });
-      } catch (err) {
-        results.push({
-          tenant: tenant.display_name,
-          store: store.id,
-          date,
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      // Either sync one explicit date (backfill mode) or a rolling window
+      // of the last `windowDays` days. Loop is sequential per store so we
+      // stay polite to Shopify's per-shop rate limit.
+      const dates = explicit
+        ? [explicit]
+        : lastNDaysInTz(store.timezone ?? "UTC", windowDays);
+      for (const date of dates) {
+        try {
+          const pull = await syncDailyOrders(store.id, date, tenant.id);
+          const pnl = await computeDailyPnl(store.id, date, tenant.id);
+          results.push({
+            tenant: tenant.display_name,
+            store: store.id,
+            date,
+            ok: true,
+            orderCount: pull.orderCount,
+            grossSales: pull.grossSales,
+            netProfit: pnl?.net_profit ?? null,
+          });
+        } catch (err) {
+          results.push({
+            tenant: tenant.display_name,
+            store: store.id,
+            date,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
 
@@ -173,7 +207,7 @@ async function handle(request: NextRequest) {
   return Response.json({
     ok: true,
     ranAt: new Date().toISOString(),
-    mode: explicit ? "backfill" : "daily-yesterday",
+    mode: explicit ? "backfill" : `rolling-${windowDays}d`,
     elapsedMs: Date.now() - started,
     skipped,
     configuredInEnv: listConfiguredStores(),

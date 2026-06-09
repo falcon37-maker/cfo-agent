@@ -1,5 +1,7 @@
 import { Sidebar } from "@/components/shell/Sidebar";
 import { TopBar } from "@/components/shell/TopBar";
+import { ChatWidget } from "@/components/ai/ChatWidget";
+import { ValidationBanner } from "@/components/shell/ValidationBanner";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getRole } from "@/lib/auth/roles";
 
@@ -24,8 +26,10 @@ export default async function ShellLayout({
       />
       <div className="main">
         <TopBar />
+        <ValidationBanner />
         <div className="content">{children}</div>
       </div>
+      <ChatWidget />
     </div>
   );
 }

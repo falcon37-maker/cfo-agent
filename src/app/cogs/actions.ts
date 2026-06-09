@@ -59,7 +59,9 @@ export async function submitCogsAction(formData: FormData) {
   const orderCount = Number(existing?.order_count ?? 0);
 
   const grossProfit = revenue - cogs;
-  const netProfit = revenue - cogs - fees - refunds - adSpend;
+  // Phase 2: daily_pnl.revenue is already net of refunds (Shopify Net Sales).
+  // Do NOT subtract refunds again — that was the double-subtraction bug.
+  const netProfit = revenue - cogs - fees - adSpend;
   const marginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
   const { error: upErr } = await sb.from("daily_pnl").upsert(
@@ -135,7 +137,9 @@ async function applyCogsToDailyPnl(
   const orderCount = Number(existing?.order_count ?? 0);
 
   const grossProfit = revenue - cogs;
-  const netProfit = revenue - cogs - fees - refunds - adSpend;
+  // Phase 2: daily_pnl.revenue is already net of refunds (Shopify Net Sales).
+  // Do NOT subtract refunds again — that was the double-subtraction bug.
+  const netProfit = revenue - cogs - fees - adSpend;
   const marginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
   const { error: upErr } = await sb.from("daily_pnl").upsert(

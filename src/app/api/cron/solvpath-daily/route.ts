@@ -26,11 +26,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
 
-// One chunk = up to 500 customers in up to ~40s (sync.ts default
-// deadlineMs). Loop budget leaves headroom for the response + Supabase
-// writes after the last chunk.
-const CHUNK_DEADLINE_MS = 40_000;
-const CHUNK_MAX_CUSTOMERS = 500;
+// One chunk = up to 2000 customers in up to ~60s (sync.ts deadlineMs).
+// Loop budget leaves headroom for the response + Supabase writes after
+// the last chunk.
+//
+// Phase 2 throughput bump: per-customer transaction-history fetches now
+// run in parallel within each page (see src/lib/solvpath/sync.ts), so a
+// single chunk can cover 2000+ customers comfortably. Previous 500-per-
+// chunk + sequential fetches missed ~85% of subscribers and surfaced as
+// "$0 recurring revenue" on the dashboard.
+const CHUNK_DEADLINE_MS = 60_000;
+const CHUNK_MAX_CUSTOMERS = 2000;
 const TOTAL_BUDGET_MS = 750_000; // 750s; Vercel cap is 800s
 
 function unauthorized() {

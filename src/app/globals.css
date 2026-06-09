@@ -1,7 +1,6 @@
 @import "tailwindcss";
 
 /* ═══ Design tokens (from Claude Design handoff) ═══ */
-:root,
 :root[data-theme="dark"] {
   --bg: #0a0a0a;
   --surface: #111113;
@@ -1244,6 +1243,46 @@ kbd {
 }
 .field-input input::placeholder {
   color: var(--muted);
+}
+/* Select dropdowns: match the input rhythm + replace the ugly native
+ * chrome with a custom caret. Without this, <select> inherits the OS
+ * widget which looks out of place next to our themed inputs. */
+.field-input select,
+.field select {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  padding: 11px 28px 11px 0;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 14px;
+}
+/* When the select isn't wrapped in .field-input (e.g. used standalone),
+ * give it the same border + bg as inputs. */
+.field > select {
+  background-color: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px 32px 11px 12px;
+  transition: border-color 120ms, background 120ms, box-shadow 120ms;
+}
+.field > select:hover {
+  border-color: var(--border-strong);
+}
+.field > select:focus {
+  border-color: var(--accent);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-bg);
 }
 .eye-btn {
   width: 24px;
@@ -2537,4 +2576,839 @@ kbd {
   .sidebar {
     display: none;
   }
+}
+
+/* ─── Phase 2 data validation banner ──────────────────────────────────── */
+.validation-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-sans), sans-serif;
+}
+.validation-banner--warn {
+  background: rgba(255, 184, 0, 0.08);
+  color: var(--warning, #b58100);
+  border-bottom-color: rgba(255, 184, 0, 0.25);
+}
+.validation-banner--error {
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--negative, #dc2626);
+  border-bottom-color: rgba(220, 38, 38, 0.25);
+}
+.validation-banner .vb-text strong {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+/* ─── Expandable daily ledger row ─────────────────────────────────────── */
+/* Ant-Design style square +/− toggle. 18px box with 1px border, sharp
+ * edges, hairline divider — feels like a real "tree node" affordance. */
+.row-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-strong, #d9d9d9);
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  margin: 0 8px 0 12px;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+.row-expand-btn:hover {
+  color: var(--accent, #16a34a);
+  border-color: var(--accent, #16a34a);
+}
+.row-expand-btn:active {
+  background: var(--surface-2);
+}
+.row-expand-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+.pnl-table tr.row-open {
+  /* Subtle highlight on the parent row so the user keeps context of
+   * which row's details are expanded. */
+  background: rgba(34, 197, 94, 0.04);
+}
+.pnl-table tr.row-open > td {
+  border-bottom-color: transparent;
+}
+.pnl-table tr.row-open .row-expand-btn {
+  color: var(--accent, #16a34a);
+  border-color: var(--accent, #16a34a);
+}
+.pnl-table tr.day-detail-row > td {
+  padding: 0;
+  background: var(--surface);
+}
+/* The td colSpans the whole table and is therefore as wide as the
+ * table's scroll width (which can exceed the viewport). To keep the
+ * expand panel inside the visible area, we wrap content in a sticky
+ * div pinned to the wrap's left edge and explicitly sized to the
+ * wrap's clientWidth (set as --detail-w via ResizeObserver). */
+.day-detail-sticky {
+  position: sticky;
+  left: 0;
+  width: var(--detail-w, 100%);
+  max-width: var(--detail-w, 100%);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.day-detail {
+  padding: 14px 12px 18px 12px;
+  background: var(--surface);
+  border-top: 1px dashed var(--border);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+.day-detail-inner {
+  max-width: 100%;
+  overflow: hidden;
+}
+.day-detail-head,
+.day-detail-stats,
+.day-detail-stores {
+  max-width: 100%;
+  min-width: 0;
+}
+.day-detail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 22px 18px 22px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.03),
+    0 4px 12px rgba(0, 0, 0, 0.04);
+  margin-left: 0;
+  margin-right: 0;
+  box-sizing: border-box;
+}
+.day-detail-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted-strong);
+  padding: 16px 4px;
+}
+.day-detail-state.err {
+  color: var(--negative);
+}
+.day-detail-state .spin {
+  animation: dayDetailSpin 1s linear infinite;
+}
+@keyframes dayDetailSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Summary stats strip on top of the expanded panel.
+ * Layout note: we deliberately render this as a self-contained card with
+ * its own background so it visually breaks free of the parent ledger
+ * table's column rhythm — without this the stat labels appear to
+ * "snap" under random columns (Orders / Revenue / Subs Rev …) above
+ * because the colSpan cell inherits column boundaries from the parent. */
+.day-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.day-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 16px;
+  min-width: 92px;
+  flex: 1 1 auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+.stat:last-child {
+  border-right: none;
+  background: var(--surface-2);
+}
+.stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
+.stat-value {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.stat-value.strong {
+  font-size: 15px;
+  color: var(--text);
+  font-weight: 700;
+}
+.stat-muted .stat-value {
+  color: var(--muted-strong);
+  font-weight: 500;
+}
+.stat-neg .stat-value {
+  color: var(--negative, #dc2626);
+}
+
+.day-detail-stores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.store-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px 4px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted-strong);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.store-meta-chip.err {
+  color: var(--negative);
+  border-color: rgba(220, 38, 38, 0.3);
+}
+.store-meta-chip.muted {
+  color: var(--muted-strong);
+  background: transparent;
+  border-style: dashed;
+  font-style: italic;
+  font-weight: 500;
+}
+.store-meta-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+}
+.store-meta-chip.err .store-meta-count {
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--negative);
+}
+.day-detail-warn {
+  padding: 8px 10px;
+  background: rgba(255, 184, 0, 0.08);
+  border: 1px solid rgba(255, 184, 0, 0.25);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--warning, #b58100);
+}
+
+/* The Shopify-Admin-style orders table inside the expanded panel */
+.day-orders-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  min-width: 0;
+  max-width: 100%;
+}
+.day-orders-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.day-orders-table th,
+.day-orders-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.day-orders-table tr:last-child td {
+  border-bottom: none;
+}
+.day-orders-table tr:hover td {
+  background: var(--surface-2);
+}
+.day-orders-table th {
+  background: var(--surface-2);
+  font-weight: 600;
+  font-size: 10.5px;
+  color: var(--muted-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.day-orders-table td.num,
+.day-orders-table th.num {
+  text-align: right;
+}
+.day-orders-table td.muted {
+  color: var(--muted-strong);
+}
+.day-orders-table td.mono {
+  font-family: var(--font-mono), monospace;
+}
+.day-orders-table td.truncate {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.order-name {
+  font-weight: 600;
+  color: var(--accent, #1d4ed8);
+}
+.store-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* Small inline badge appended to a daily-ledger row's order count,
+ * surfacing the PHX subscription rebill count that doesn't have
+ * individual rows in the Shopify expand panel. Lets the count next
+ * to the badge stay = Shopify orders only (matches the expand). */
+.phx-orders-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent, #16a34a);
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  cursor: help;
+}
+
+.day-orders-table td.nowrap {
+  white-space: nowrap;
+}
+.day-orders-table .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: capitalize;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.day-orders-table .pill .pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+/* Tag chip list — matches Shopify "Prime Bundles" style boxed tags */
+.tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 200px;
+}
+.tag-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+.tag-chip-overflow {
+  font-weight: 600;
+  color: var(--muted-strong);
+  cursor: default;
+}
+
+/* Orders block — container that holds the table + pagination footer */
+.day-orders-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Pagination — Ant Design style. Numbered page buttons with neighbours
+ * and an ellipsis for skipped ranges. Lives below the orders table, not
+ * attached to it, so it feels like a proper standalone control. */
+.orders-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2px;
+  font-size: 12px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pagination-info {
+  color: var(--muted-strong);
+  font-variant-numeric: tabular-nums;
+}
+.pagination-info strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pg-num,
+.pg-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-sans), sans-serif;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.pg-num:hover:not(:disabled),
+.pg-arrow:hover:not(:disabled) {
+  border-color: var(--accent, #16a34a);
+  color: var(--accent, #16a34a);
+}
+.pg-num.active {
+  border-color: var(--accent, #16a34a);
+  color: var(--accent, #16a34a);
+  background: var(--surface);
+  font-weight: 600;
+}
+.pg-arrow:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--muted);
+}
+.pg-arrow:disabled:hover {
+  border-color: var(--border);
+  color: var(--muted);
+}
+.pg-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.day-orders-table .pill-paid {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.day-orders-table .pill-pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.day-orders-table .pill-unfulfilled {
+  background: rgba(255, 184, 0, 0.12);
+  color: #92400e;
+  border-color: rgba(255, 184, 0, 0.3);
+}
+.day-orders-table .pill-fulfilled {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1e40af;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.day-orders-table .pill-refunded,
+.day-orders-table .pill-partially-refunded,
+.day-orders-table .pill-partially_refunded {
+  background: rgba(220, 38, 38, 0.10);
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.25);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Settings → Stores grid (v2). Replaces .stores-grid + .store-card.
+ * Bigger, more breathable cards with clearer hierarchy + an actions
+ * row that includes "View orders" / "Test" / "Edit".
+ * ════════════════════════════════════════════════════════════════════ */
+.stores-grid-v2 {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+.store-card-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 18px 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.store-card-v2:hover {
+  border-color: rgba(34, 197, 94, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+.store-card-v2.inactive {
+  opacity: 0.65;
+  background: var(--surface-inset);
+}
+.store-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.store-card-v2 .store-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  margin-top: 2px;
+}
+.store-card-v2 .store-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, ui-monospace);
+  font-size: 11.5px;
+  color: var(--muted-strong);
+  word-break: break-all;
+  flex-wrap: wrap;
+}
+.cred-source-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted-strong);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: help;
+}
+
+/* Pill tones — extend the existing .status-pill. */
+.status-pill.neutral {
+  background: var(--surface-2);
+  color: var(--muted-strong);
+  border: 1px solid var(--border);
+}
+.status-pill.neutral .dot {
+  background: var(--muted);
+}
+
+/* Card actions row at the bottom — small ghost / primary mix. */
+.store-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+  flex-wrap: wrap;
+}
+.store-card-actions .ghost-btn,
+.store-card-actions .primary-btn-sm {
+  font-size: 11px;
+  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.12s, border-color 0.12s;
+}
+.store-card-actions .ghost-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.store-card-actions .ghost-btn:hover {
+  border-color: var(--accent, #16a34a);
+  color: var(--accent, #16a34a);
+}
+.store-card-actions .primary-btn-sm {
+  background: var(--accent, #16a34a);
+  color: #fff;
+  border: 1px solid var(--accent, #16a34a);
+}
+.store-card-actions .primary-btn-sm:hover {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+.spin {
+  animation: storeSpin 1s linear infinite;
+}
+@keyframes storeSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Drawer — right side slide-in panel used for Add/Edit store.
+ * Z-index sits above the chat widget (which is 1000-ish) so the
+ * drawer is the modal top layer when open.
+ * ════════════════════════════════════════════════════════════════════ */
+.drawer-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.32);
+  animation: drawerFadeIn 0.18s ease-out;
+}
+@keyframes drawerFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.drawer-panel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(520px, 100vw);
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  animation: drawerSlideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes drawerSlideIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 22px 24px 18px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.drawer-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.drawer-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted-strong);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.drawer-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 24px 28px 24px;
+}
+
+/* Two-column form row helper used by the store form. */
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 480px) {
+  .form-row-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Auth panel — always open (no details/summary) since this is the
+ * highest-value section of the form. The header includes a state
+ * badge so editors instantly see whether a token is stored / loaded
+ * from env / missing. */
+.auth-details {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.auth-summary {
+  padding: 12px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.auth-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-strong);
+}
+.auth-state .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+.auth-state.ok {
+  color: var(--accent, #15803d);
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.08);
+}
+.auth-state.ok .dot {
+  background: var(--accent, #16a34a);
+}
+.auth-state.env {
+  color: #1e40af;
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.08);
+}
+.auth-state.env .dot {
+  background: #3b82f6;
+}
+.auth-state.warn {
+  color: #92400e;
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.08);
+}
+.auth-state.warn .dot {
+  background: #f59e0b;
+}
+.auth-fields {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.auth-or {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 0;
+  letter-spacing: 0.04em;
+}
+.auth-env-note {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--muted-strong);
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.auth-env-note code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
 }

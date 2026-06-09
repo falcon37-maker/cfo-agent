@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Lato } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 
 const inter = Inter({
@@ -40,13 +39,15 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-theme="dark" className={`${inter.variable} ${jetbrains.variable} ${lato.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${jetbrains.variable} ${lato.variable}`}>
       <head>
-        <Script id="theme-boot" strategy="beforeInteractive">
-          {themeBootScript}
-        </Script>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
-      <body>{children}</body>
+      {/* suppressHydrationWarning on body suppresses Grammarly / 1Password
+          / similar browser extensions that inject data-* attributes on
+          <body> after page load, which would otherwise trip React's
+          hydration mismatch warning in dev. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

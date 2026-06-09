@@ -24,6 +24,19 @@ function isPublic(pathname: string): boolean {
 }
 
 export async function updateSession(request: NextRequest) {
+  // Dev-only test bypass: requests carrying x-test-user-id + x-test-secret
+  // matching CFO_TEST_BYPASS_SECRET skip the cookie-based auth check so
+  // test scripts can drive the API without a browser session. Production
+  // never enters this branch (both NODE_ENV and the secret must match).
+  if (process.env.NODE_ENV !== "production") {
+    const testUser = request.headers.get("x-test-user-id");
+    const testSecret = request.headers.get("x-test-secret");
+    const expected = process.env.CFO_TEST_BYPASS_SECRET;
+    if (testUser && testSecret && expected && testSecret === expected) {
+      return NextResponse.next({ request });
+    }
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

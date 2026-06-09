@@ -351,26 +351,40 @@ export async function backfillRevenueForRange(
       });
       const customers = resp.Result ?? [];
 
+      // Filter out already-seen customers BEFORE we fan out network calls.
+      const fresh: typeof customers = [];
       for (const cust of customers) {
         customersSeen += 1;
-
-        // Skip if we already pulled this customer's history in an earlier
-        // chunk / under a different status list.
         if (seenCustomers.has(cust.CustomerId)) {
           customersSkippedDup += 1;
           continue;
         }
         seenCustomers.add(cust.CustomerId);
         newlySeen.add(cust.CustomerId);
+        fresh.push(cust);
+      }
 
-        let history: { Result: SolvpathTransaction[] };
-        try {
-          history = await getTransactionHistory(opts.tenantId, cust.CustomerId, opts.from);
-        } catch {
-          continue;
-        }
+      // Fan out transaction-history fetches in parallel within this page.
+      // PAGE_SIZE is small (≤10), so concurrency stays well under any
+      // reasonable rate limit. This is the main throughput improvement —
+      // sequential per-customer fetches were the bottleneck that limited
+      // each cron fire to ~500 customers and missed recurring revenue.
+      const histories = await Promise.all(
+        fresh.map(async (cust) => {
+          try {
+            const h = await getTransactionHistory(
+              opts.tenantId,
+              cust.CustomerId,
+              opts.from,
+            );
+            return { cust, rows: h.Result ?? [] };
+          } catch {
+            return { cust, rows: [] as SolvpathTransaction[] };
+          }
+        }),
+      );
 
-        const rows = history.Result ?? [];
+      for (const { cust, rows } of histories) {
         if (rows.length > 0) customersWithTx += 1;
 
         // Per-customer OrderId dedupe: Solvpath's /transaction-history can
@@ -426,9 +440,10 @@ export async function backfillRevenueForRange(
           totalStore[cls.bucket] += cls.amount;
           totalStore[COUNT_KEY[cls.bucket]] += 1;
         }
-
-        if (throttle > 0) await new Promise((r) => setTimeout(r, throttle));
       }
+      // Brief per-page pause to stay polite to Solvpath. Per-customer
+      // throttle is gone — concurrency within a page replaces it.
+      if (throttle > 0) await new Promise((r) => setTimeout(r, throttle));
 
       // End-of-page decisions. We only stop on page boundaries so the cursor
       // stays simple (status + page).

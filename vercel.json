@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/solvpath-daily",
       "schedule": "0 8,9,10,11,12,13,14 * * *"
+    },
+    {
+      "path": "/api/cron/data-validation",
+      "schedule": "30 15 * * *"
     }
   ]
 }

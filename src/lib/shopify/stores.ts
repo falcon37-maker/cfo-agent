@@ -66,23 +66,6 @@ async function loadDbStoreRow(
   return (data as StoreRow | null) ?? null;
 }
 
-function fromEnv(code: string): ShopifyStoreCreds | null {
-  const upper = code.toUpperCase();
-  const domain = process.env[`${upper}_DOMAIN`];
-  const rawToken = process.env[`${upper}_TOKEN`];
-  const clientId = process.env[`${upper}_CLIENT_ID`];
-
-  if (!domain || !rawToken) return null;
-
-  if (rawToken.startsWith("shpat_")) {
-    return { code: upper, domain, accessToken: rawToken };
-  }
-  if (rawToken.startsWith("shpss_") && clientId) {
-    return { code: upper, domain, clientId, clientSecret: rawToken };
-  }
-  return null;
-}
-
 function fromDbRow(
   code: string,
   row: StoreRow,
@@ -112,10 +95,16 @@ function fromDbRow(
   return null;
 }
 
-/** Resolve credentials for a store. Reads the DB row first; falls back to
- *  env vars matching {CODE}_DOMAIN/{CODE}_TOKEN. Throws when neither is
- *  configured. tenantId is required so the lookup doesn't accidentally
- *  pick up another tenant's store with the same code. */
+/** Resolve credentials for a store from the DATABASE.
+ *
+ *  As of Jun 2026 env-var fallback is disabled: tokens live exclusively
+ *  in the encrypted `stores` columns. The `{CODE}_DOMAIN`/`{CODE}_TOKEN`
+ *  env vars are only used by the one-shot migration script — runtime
+ *  callers always go through the DB so credential rotation is editable
+ *  from the Settings UI without a code deploy.
+ *
+ *  tenantId is required so the lookup doesn't accidentally pick up
+ *  another tenant's store with the same code. */
 export async function getStoreCreds(
   code: string,
   tenantId: string,
@@ -126,12 +115,9 @@ export async function getStoreCreds(
     const fromDb = fromDbRow(upper, row);
     if (fromDb) return fromDb;
   }
-  const fromEnvCreds = fromEnv(upper);
-  if (fromEnvCreds) return fromEnvCreds;
   throw new Error(
     `No Shopify credentials configured for store "${upper}" in tenant ` +
-      `${tenantId}. Save them on the Settings page or set ${upper}_DOMAIN ` +
-      `+ ${upper}_TOKEN in env.`,
+      `${tenantId}. Open Settings → Stores → Edit and paste a token.`,
   );
 }
 
@@ -150,7 +136,10 @@ export async function hasStoreCreds(
   }
 }
 
-/** Env-only diagnostic: list every store code that has env-var creds. */
+/** @deprecated Env-only diagnostic. Runtime credential resolution moved
+ *  to the database in Jun 2026; this function only inspects env vars and
+ *  is retained for the cron-sync debug endpoint payload. Do not use for
+ *  routing logic — call {@link getStoreCreds} instead. */
 export function listConfiguredStores(): string[] {
   const codes = new Set<string>();
   for (const key of Object.keys(process.env)) {
@@ -162,6 +151,7 @@ export function listConfiguredStores(): string[] {
   return Array.from(codes).sort();
 }
 
+/** @deprecated Env-only diagnostic. See {@link listConfiguredStores}. */
 export function describeConfiguredTokens(): Array<{
   code: string;
   tokenPrefix: string;

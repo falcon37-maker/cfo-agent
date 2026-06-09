@@ -1,13 +1,21 @@
 // Daily P&L computation.
-// Formula (Phase 1, per user spec):
-//   revenue     = daily_orders.gross_sales
-//   cogs        = order_count * stores.default_cogs_per_order     (blended)
-//   fees        = gross_sales  * stores.processing_fee_pct        (processor + Shopify)
-//   refunds     = daily_orders.refunds
-//   ad_spend    = sum(daily_ad_spend.spend)                       (0 until Phase 2)
-//   gross_profit = revenue - cogs
-//   net_profit   = revenue - cogs - fees - refunds - ad_spend
-//   margin_pct   = net_profit / revenue * 100
+//
+// Phase 2 (May 2026) update: `revenue` now matches Shopify Admin → Analytics
+// → Sales Report's "Net sales" exactly. That column is defined as
+// gross − discounts − returns. Shopify's `subtotalPriceSet` is already
+// gross − discounts (PRE-refund), and `daily_orders.gross_sales` stores
+// exactly that. So Net Sales = gross_sales − refunds.
+//
+// Formula:
+//   revenue      = daily_orders.gross_sales − daily_orders.refunds
+//                    (= Shopify "Net sales" on the Sales Report)
+//   cogs         = order_count × stores.default_cogs_per_order   (blended)
+//   fees         = revenue × stores.processing_fee_pct           (processor + Shopify)
+//   ad_spend     = Σ daily_ad_spend.spend
+//   gross_profit = revenue − cogs
+//   net_profit   = revenue − cogs − fees − ad_spend
+//                    (refunds already removed in revenue — do NOT subtract again)
+//   margin_pct   = net_profit / revenue × 100
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -63,14 +71,19 @@ export async function computeDailyPnl(
   const cogsPerOrder = Number(store.default_cogs_per_order ?? 0);
   const feePct = Number(store.processing_fee_pct ?? 0);
 
-  const revenue = Number(orders.gross_sales);
+  // `revenue` = Shopify "Net sales" = gross_sales (already net of discounts)
+  // minus refunds. This makes the dashboard's revenue column match Shopify
+  // Admin → Analytics → Sales Report exactly.
+  const grossSales = Number(orders.gross_sales);
+  const refunds = Number(orders.refunds);
+  const revenue = r2(grossSales - refunds);
   const cogs = Number(orders.order_count) * cogsPerOrder;
   const fees = revenue * feePct;
-  const refunds = Number(orders.refunds);
   const adSpend = (adRows ?? []).reduce((sum, r) => sum + Number(r.spend ?? 0), 0);
 
   const grossProfit = revenue - cogs;
-  const netProfit = revenue - cogs - fees - refunds - adSpend;
+  // Refunds are already removed in revenue — don't subtract again.
+  const netProfit = revenue - cogs - fees - adSpend;
   const marginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
   const row: DailyPnl = {

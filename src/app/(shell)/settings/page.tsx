@@ -2,12 +2,9 @@ import { loadDashboardData } from "@/lib/pnl/queries";
 import { fmtMoney } from "@/lib/format";
 import { requireTenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import {
-  AddStoreToggle,
-  StoreEditRow,
-  type StoreEditValues,
-} from "@/components/settings/StoreForm";
+import { StoresGrid } from "@/components/settings/StoresGrid";
 import { CheckCircle2, AlertCircle } from "lucide-react";
+import type { StoreCard } from "@/components/settings/StoresGrid";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +19,7 @@ const ERR_MAP: Record<string, string> = {
   duplicate_id: "A store with that code already exists.",
   bad_fee_pct: "Processing fee % must be a number.",
   bad_fee_fixed: "Processing fee fixed must be a number.",
+  forbidden: "You don't have permission to modify stores.",
 };
 
 type StoreRow = {
@@ -72,6 +70,45 @@ export default async function StoresSettingsPage({
   const errKey = params.err ?? "";
   const errMessage = ERR_MAP[errKey] ?? (errKey ? errKey : null);
 
+  // Build the props for the client component. We compute initial credential
+  // source server-side so each card renders an accurate pill on first paint;
+  // the client component then verifies live with /api/stores/test-connection
+  // when the user clicks "Test connection" (or when the page first mounts —
+  // see StoresGrid).
+  const cards: StoreCard[] = stores.map((s) => {
+    const mix = statsByStore.get(s.id);
+    const today = mix?.revenue ?? 0;
+    const share = totalToday > 0 ? (today / totalToday) * 100 : 0;
+    // As of the env→DB migration (Jun 2026) we treat the database as the
+    // single source of truth. Env-var fallback is no longer read at runtime
+    // — see src/lib/shopify/stores.ts — so this flag is purely "does the
+    // stores table row carry a token?". If yes → "db", else → "none".
+    // The live `/api/stores/test-connection` ping then refines the badge
+    // to Connected / Invalid based on the actual Shopify response.
+    const dbHasToken =
+      Boolean(s.shopify_token_encrypted) ||
+      (Boolean(s.shopify_client_id) &&
+        Boolean(s.shopify_client_secret_encrypted));
+    const credSource: "db" | "env" | "none" = dbHasToken ? "db" : "none";
+    return {
+      id: s.id,
+      name: s.name,
+      domain: s.shopify_domain ?? s.shop_domain ?? null,
+      store_type: (s.store_type ?? "shopify") as "shopify" | "manual",
+      is_active: s.is_active,
+      currency: s.currency,
+      timezone: s.timezone,
+      processing_fee_pct: s.processing_fee_pct,
+      processing_fee_fixed: s.processing_fee_fixed,
+      todayRevenue: today,
+      sharePct: share,
+      credSource,
+      shopify_client_id: s.shopify_client_id,
+      has_static_token: !!s.shopify_token_encrypted,
+      has_oauth_secret: !!s.shopify_client_secret_encrypted,
+    };
+  });
+
   return (
     <>
       {params.ok ? (
@@ -87,88 +124,7 @@ export default async function StoresSettingsPage({
         </div>
       ) : null}
 
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <div className="card-title">Stores</div>
-            <div className="card-sub">
-              {stores.length} configured · revenue share based on the most recent
-              day with data
-            </div>
-          </div>
-          <div className="card-actions">
-            <AddStoreToggle />
-          </div>
-        </div>
-        <div className="stores-grid">
-          {stores.map((s) => {
-            const mix = statsByStore.get(s.id);
-            const today = mix?.revenue ?? 0;
-            const share = totalToday > 0 ? (today / totalToday) * 100 : 0;
-            const hasCreds =
-              !!s.shopify_token_encrypted ||
-              (!!s.shopify_client_id && !!s.shopify_client_secret_encrypted);
-            const editValue: StoreEditValues = {
-              id: s.id,
-              name: s.name,
-              store_type: (s.store_type ?? "shopify") as "shopify" | "manual",
-              shopify_domain: s.shopify_domain ?? s.shop_domain,
-              shopify_client_id: s.shopify_client_id,
-              has_static_token: !!s.shopify_token_encrypted,
-              has_oauth_secret: !!s.shopify_client_secret_encrypted,
-              processing_fee_pct: s.processing_fee_pct,
-              processing_fee_fixed: s.processing_fee_fixed,
-              is_active: s.is_active,
-            };
-            return (
-              <div key={s.id} className="store-card">
-                <div className="store-head">
-                  <div className="letter-tile">{s.id.charAt(0)}</div>
-                  <span
-                    className={`status-pill ${
-                      !s.is_active ? "warn" : hasCreds ? "pos" : "warn"
-                    }`}
-                  >
-                    <span className="dot" />
-                    {!s.is_active
-                      ? "Inactive"
-                      : hasCreds
-                        ? "Connected"
-                        : "Needs token"}
-                  </span>
-                </div>
-                <div className="store-name">{s.name}</div>
-                <div className="store-url">
-                  {s.shopify_domain ?? s.shop_domain}
-                </div>
-                <div className="store-divider" />
-                <div className="store-meta">
-                  <div>
-                    <div className="sm-label">Today&apos;s revenue</div>
-                    <div className="sm-val">{fmtMoney(today)}</div>
-                  </div>
-                  <div>
-                    <div className="sm-label">Share</div>
-                    <div className="sm-val" style={{ color: "var(--accent)" }}>
-                      {share.toFixed(0)}%
-                    </div>
-                  </div>
-                </div>
-                <div className="store-acct">
-                  {s.currency} · {s.timezone} · fees{" "}
-                  {((s.processing_fee_pct ?? 0) * 100).toFixed(1)}%
-                  {s.processing_fee_fixed != null && s.processing_fee_fixed > 0
-                    ? ` + $${s.processing_fee_fixed.toFixed(2)}`
-                    : ""}
-                </div>
-                <div style={{ marginTop: 10 }}>
-                  <StoreEditRow value={editValue} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <StoresGrid cards={cards} />
     </>
   );
 }

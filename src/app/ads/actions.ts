@@ -80,7 +80,9 @@ export async function submitAdSpendAction(formData: FormData) {
   const refunds = Number(existingPnl?.refunds ?? 0);
   const adSpend = Math.round(totalSpend * 100) / 100;
   const grossProfit = revenue - cogs;
-  const netProfit = revenue - cogs - fees - refunds - adSpend;
+  // Phase 2: revenue already excludes refunds (Shopify "Net sales"), so
+  // do NOT subtract them again here.
+  const netProfit = revenue - cogs - fees - adSpend;
   const marginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
   const pnlRow = {
@@ -190,7 +192,8 @@ async function recomputeAdSpendFor(
   const fees = Number(pnl?.fees ?? 0);
   const refunds = Number(pnl?.refunds ?? 0);
   const grossProfit = revenue - cogs;
-  const netProfit = revenue - cogs - fees - refunds - totalSpend;
+  // Phase 2: revenue already excludes refunds (Shopify "Net sales").
+  const netProfit = revenue - cogs - fees - totalSpend;
   const marginPct = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
   const { error: pnlErr } = await sb.from("daily_pnl").upsert(
