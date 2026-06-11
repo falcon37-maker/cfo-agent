@@ -21,11 +21,22 @@ export type SolvpathCreds = {
   baseUrl: string;
 };
 
+export type PaysightCreds = {
+  apiKey: string; // raw key sent in Authorization header (no Bearer prefix)
+  clientId: string; // Paysight tenant/parent-company id (e.g. "505")
+  userEmail: string; // requesting user's email (required header)
+  baseUrl: string;
+};
+
 export type ZohoBooksCreds = {
   orgId: string;
 };
 
-export type Provider = "chargeblast" | "solvpath" | "zoho_books";
+export type Provider =
+  | "chargeblast"
+  | "solvpath"
+  | "paysight"
+  | "zoho_books";
 
 type IntegrationRow = {
   id: string;
@@ -106,6 +117,31 @@ export async function getSolvpathCreds(
     SOLVPATH_DEFAULT_BASE_URL;
   if (!partnerId || !partnerToken || !bearerToken) return null;
   return { partnerId, partnerToken, bearerToken, baseUrl };
+}
+
+const PAYSIGHT_DEFAULT_BASE_URL = "https://test.paysight.io";
+
+/** Resolved Paysight creds for a tenant. DB-first, env-var fallback. */
+export async function getPaysightCreds(
+  tenantId: string,
+): Promise<PaysightCreds | null> {
+  const row = await loadIntegrationRow(tenantId, "paysight");
+  const enc = (row?.credentials as Record<string, unknown> | undefined) ?? {};
+  const dbClientId =
+    typeof enc.clientId === "string" ? (enc.clientId as string) : undefined;
+  const dbUserEmail =
+    typeof enc.userEmail === "string" ? (enc.userEmail as string) : undefined;
+  const dbBaseUrl =
+    typeof enc.baseUrl === "string" ? (enc.baseUrl as string) : undefined;
+  const dbApiKey = maybeDecrypt(enc.apiKey);
+
+  const apiKey = dbApiKey || process.env.PAYSIGHT_API_KEY || "";
+  const clientId = dbClientId || process.env.PAYSIGHT_CLIENT_ID || "";
+  const userEmail = dbUserEmail || process.env.PAYSIGHT_USER_EMAIL || "";
+  const baseUrl =
+    dbBaseUrl || process.env.PAYSIGHT_BASE_URL || PAYSIGHT_DEFAULT_BASE_URL;
+  if (!apiKey || !clientId || !userEmail) return null;
+  return { apiKey, clientId, userEmail, baseUrl };
 }
 
 export async function getZohoBooksCreds(
@@ -229,6 +265,7 @@ export async function describeIntegrationStatus(
   > = {
     chargeblast: { configured: false, fields: [], lastSyncedAt: null },
     solvpath: { configured: false, fields: [], lastSyncedAt: null },
+    paysight: { configured: false, fields: [], lastSyncedAt: null },
     zoho_books: { configured: false, fields: [], lastSyncedAt: null },
   };
   for (const r of (data ?? []) as Array<{

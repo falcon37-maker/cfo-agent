@@ -133,7 +133,7 @@ async function handle(request: NextRequest) {
             counts,
           },
         },
-        { onConflict: "store_id,range_from,range_to" },
+        { onConflict: "tenant_id,store_id,range_from,range_to" },
       );
       if (error) {
         return Response.json(

@@ -7,6 +7,7 @@ import {
   loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
+import { loadPaysightSubsByDate } from "@/lib/paysight/queries";
 
 // Stores for which PHX/Solvpath is the source of truth for revenue. For any
 // other store, Shopify's daily_pnl stays the source (future stores that only
@@ -427,6 +428,23 @@ export async function loadBlendedDashboardData(
   const phxByDayCur = rollupPhxByDay(phxCur);
   const phxByDayPrior = rollupPhxByDay(phxPrior);
 
+  // Paysight subscription revenue per day — preferred source over Phoenix
+  // for the subs bucket (subscriptions migrated Phoenix→Paysight Jun 2026).
+  // Used in the blend below: on dates where Paysight has data we substitute
+  // its subscription revenue for Phoenix's, avoiding the migration gap.
+  const paysightCur = await loadPaysightSubsByDate(
+    tenantId,
+    from,
+    to,
+    phxStoreIds,
+  );
+  const paysightPrior = await loadPaysightSubsByDate(
+    tenantId,
+    priorFrom,
+    priorTo,
+    phxStoreIds,
+  );
+
   // Manual revenue entries (coaching / consulting / one-offs).
   const manualByDayCur = await loadManualRevenueByDay(tenantId, from, to);
   const manualByDayPrior = await loadManualRevenueByDay(
@@ -466,12 +484,25 @@ export async function loadBlendedDashboardData(
     const allShop = aggregate(shopifyByDateAll[cur] ?? []);
     const phxShop = aggregate(shopifyByDatePhx[cur] ?? []);
     const phx = phxByDayCur.get(cur) ?? emptyPhxDay;
-    // PHX stores' real net = PHX revenue − processor fees − the Shopify-side
-    // costs they still incur (logged ad_spend / cogs / refunds / fees).
-    // Without this subtraction the dashboard double-shows costs in the row
-    // while ignoring them in net profit.
+
+    // Subscription bucket: Paysight preferred, Phoenix fallback (migration).
+    // Substitute Paysight's subscription revenue + count for Phoenix's on
+    // any day Paysight has data; keep Phoenix's direct/upsell components.
+    const pay = paysightCur.get(cur);
+    const usePay = !!pay && pay.subs > 0;
+    const subs = usePay ? pay!.subs : phx.subs;
+    const subsBilled = usePay ? pay!.subOrders : phx.subsBilledCount;
+    // phx.total = direct + initial + recurring + salvage + upsell. Swap the
+    // subscription portion (initial+recurring+salvage = phx.subs) for the
+    // Paysight figure so the blended total reflects the live source.
+    const phxTotal = usePay ? phx.total - phx.subs + pay!.subs : phx.total;
+
+    // PHX stores' real net = subscription revenue − processor fees − the
+    // Shopify-side costs they still incur (logged ad_spend / cogs / refunds
+    // / fees). Without this subtraction the dashboard double-shows costs in
+    // the row while ignoring them in net profit.
     const phxContribution =
-      phx.total * (1 - feeRate)
+      phxTotal * (1 - feeRate)
       - phxShop.ad_spend
       - phxShop.cogs
       - phxShop.refunds
@@ -486,9 +517,9 @@ export async function loadBlendedDashboardData(
       shopify_orders: allShop.order_count,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
-      phx_revenue: round2(phx.total),
+      phx_revenue: round2(phxTotal),
       phx_net_contribution: round2(phxContribution),
-      phx_subs_billed: phx.subsBilledCount,
+      phx_subs_billed: subsBilled,
       // Frontend = Shopify checkout revenue for PHX stores (one-time +
       // subscription-enrollment dollars). Pre-classifier-fix this came
       // from PHX revenue_direct, which lumped both kinds together; now
@@ -498,10 +529,10 @@ export async function loadBlendedDashboardData(
       // there's no double-count at the total level — just the same
       // enrollment dollars surfacing in both Frontend and Subs columns.
       phx_frontend_revenue: round2(phxShop.revenue),
-      phx_subs_revenue: round2(phx.subs),
+      phx_subs_revenue: round2(subs),
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manual),
-      total_revenue: round2(nonPhxShop.revenue + phx.total + manual),
+      total_revenue: round2(nonPhxShop.revenue + phxTotal + manual),
       total_net_profit: round2(nonPhxContribution + phxContribution + manual),
     });
     cur = addDays(cur, 1);
@@ -515,8 +546,13 @@ export async function loadBlendedDashboardData(
     const allShop = aggregate(shopifyByDatePriorAll[curP] ?? []);
     const phxShop = aggregate(shopifyByDatePriorPhx[curP] ?? []);
     const phx = phxByDayPrior.get(curP) ?? emptyPhxDay;
+    const payP = paysightPrior.get(curP);
+    const usePayP = !!payP && payP.subs > 0;
+    const subsP = usePayP ? payP!.subs : phx.subs;
+    const subsBilledP = usePayP ? payP!.subOrders : phx.subsBilledCount;
+    const phxTotalP = usePayP ? phx.total - phx.subs + payP!.subs : phx.total;
     const phxContribution =
-      phx.total * (1 - feeRate)
+      phxTotalP * (1 - feeRate)
       - phxShop.ad_spend
       - phxShop.cogs
       - phxShop.refunds
@@ -530,14 +566,14 @@ export async function loadBlendedDashboardData(
       shopify_orders: allShop.order_count,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
-      phx_revenue: round2(phx.total),
+      phx_revenue: round2(phxTotalP),
       phx_net_contribution: round2(phxContribution),
-      phx_subs_billed: phx.subsBilledCount,
+      phx_subs_billed: subsBilledP,
       phx_frontend_revenue: round2(phxShop.revenue),
-      phx_subs_revenue: round2(phx.subs),
+      phx_subs_revenue: round2(subsP),
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manualP),
-      total_revenue: round2(nonPhxShop.revenue + phx.total + manualP),
+      total_revenue: round2(nonPhxShop.revenue + phxTotalP + manualP),
       total_net_profit: round2(nonPhxShop.net_profit + phxContribution + manualP),
     });
     curP = addDays(curP, 1);
@@ -707,6 +743,19 @@ export async function loadPnlLedger(
   const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
   const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter, tenantId);
 
+  // Paysight subscription revenue per date — same PHX-store filter. Used as
+  // the PREFERRED subscription source (Phoenix is the fallback) because the
+  // subscriptions migrated Phoenix → Paysight in Jun 2026: on any date where
+  // Paysight has data we use it, otherwise we fall back to Phoenix. This
+  // avoids both double-counting (on overlap days) and gaps (on migration
+  // days where Phoenix is empty).
+  const paysightByDate = await loadPaysightSubsByDate(
+    tenantId,
+    winFrom,
+    winTo,
+    phxStoresInFilter,
+  );
+
   // Per-day PHX contribution split into two buckets:
   //   subs   = Initial + Recurring + Salvage  → goes into "subs revenue"
   //   upsell = revenue_upsell                 → goes into "frontend revenue"
@@ -757,34 +806,49 @@ export async function loadPnlLedger(
   const ledger: DailyRow[] = ordered.map((d) => {
     const base = aggregate(byDate[d]);
     const phx = phxByDate.get(d);
-    if (!phx || phx.subs + phx.upsell === 0) return base;
-    // PHX dollars add to revenue. Net profit picks up the PHX revenue
-    // × (1 − fee_rate); the store's Shopify-side ad_spend / cogs / fees /
-    // refunds were already baked into base.net_profit by the aggregator.
-    //
-    // Splits per client spec:
+    const pay = paysightByDate.get(d);
+
+    // ── Subscription source: Paysight preferred, Phoenix fallback ──
+    // On any date where Paysight has data, it's the source of truth (it's
+    // the platform subscriptions migrated to). Phoenix only fills dates
+    // before the migration where Paysight has nothing. Upsell stays a
+    // Phoenix concept (Paysight transactions don't carry an upsell split),
+    // so it's always taken from Phoenix.
+    const usePaysight = !!pay && pay.subs > 0;
+    const subs = usePaysight ? pay!.subs : phx?.subs ?? 0;
+    const subOrders = usePaysight ? pay!.subOrders : phx?.subOrders ?? 0;
+    const upsell = phx?.upsell ?? 0;
+    const upsellOrders = phx?.upsellOrders ?? 0;
+
+    if (subs + upsell === 0) {
+      return { ...base, phx_order_count: 0 };
+    }
+
+    // Subscription dollars add to revenue. Net profit picks up the
+    // subscription revenue × (1 − fee_rate); the store's Shopify-side
+    // ad_spend / cogs / fees / refunds were already baked into
+    // base.net_profit by the aggregator.
     //   - upsell rolls into frontend revenue (base.revenue)
-    //   - subs (Initial + Recurring + Salvage) is its own bucket
-    const phxRevenue = phx.subs + phx.upsell;
-    const phxContribution = phxRevenue * (1 - feeRate);
-    const frontend = base.revenue + phx.upsell;
-    const totalRev = frontend + phx.subs;
+    //   - subs (Initial + Recurring + Salvage, or Paysight charges) is its
+    //     own bucket
+    const subRevenue = subs + upsell;
+    const subContribution = subRevenue * (1 - feeRate);
+    const frontend = base.revenue + upsell;
+    const totalRev = frontend + subs;
     return {
       ...base,
       revenue: frontend,
-      subs_revenue: phx.subs,
+      subs_revenue: subs,
       total_revenue: totalRev,
-      // Keep order_count = Shopify orders only so the parent ledger row's
-      // count matches what the expand panel returns from shopify_orders.
-      // PHX subscription order count (subs + upsell) is surfaced as a
-      // separate field that the UI can display alongside (e.g. "40 +27").
+      // order_count stays Shopify-only so the parent row matches the expand
+      // panel; subscription order count is surfaced separately as "+N subs".
       order_count: base.order_count,
-      phx_order_count: phx.subOrders + phx.upsellOrders,
-      net_profit: base.net_profit + phxContribution,
-      gross_profit: base.gross_profit + phxRevenue,
+      phx_order_count: subOrders + upsellOrders,
+      net_profit: base.net_profit + subContribution,
+      gross_profit: base.gross_profit + subRevenue,
       margin_pct:
         totalRev > 0
-          ? ((base.net_profit + phxContribution) / totalRev) * 100
+          ? ((base.net_profit + subContribution) / totalRev) * 100
           : 0,
     };
   });

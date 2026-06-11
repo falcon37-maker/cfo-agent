@@ -93,11 +93,57 @@ Shopify Admin API (GraphQL `2025-01`) · Vercel hosting.
   and "View orders" actions, professional card layout
 - Token rotation now possible from the UI (no code deploy)
 
-### ⏳ Phase 6 — Phoenix ↔ Paysight Sync (NEXT)
-- Client requested this in June 2026 as the next priority
-- **Blocked on**: Paysight API access / credentials, data-flow spec, direction
-- Scope to define: which entities sync (subscriptions, billing events,
-  chargebacks), one-way or bidirectional, frequency
+### ✅ Phase 6 — Phoenix ↔ Paysight Sync (DONE — Jun 8 2026)
+Client confirmed **Option A**: both Phoenix and Paysight feed the CFO Agent
+dashboard for a combined subscription view (they don't sync to each other
+directly). Paysight is a subscription/payment CRM like Phoenix/ApexGateway.
+
+- **Phoenix (Solvpath)**: live credentials added (`partnerId 280` + tokens);
+  revenue pipeline verified end-to-end.
+- **Paysight**: built from scratch in one day.
+  - Decoded the API (auth = raw key in `Authorization` + `ClientId` + `UserEmail`
+    headers; base `https://test.paysight.io`; endpoints
+    `/api/mitigation/subscriptions` + `/api/mitigation/transactions`).
+  - New tables `paysight_transactions` + `paysight_subscriptions`
+    (migration 019).
+  - `src/lib/paysight/{client,sync,queries}.ts` — pull, store-map (descriptor →
+    NOVA/NURA/KOVA), upsert, dashboard rollup.
+  - `/api/sync/paysight` (ping/sync/range) + `/api/cron/paysight-daily`
+    (3-day rolling window, scheduled 08:15 UTC in vercel.json).
+  - Backfilled 10 days (all that exists in the test env): 405 subscriptions,
+    917 transactions. **Verified 89/89 transactions match the Paysight
+    dashboard** for Jun 8.
+  - Surfaced on `/subscriptions` as a "Paysight · CRM" card (revenue,
+    active subscribers, txn counts, per-store breakdown).
+
+**Open items for Phase 6:**
+- Confirm Paysight **production** API URL (we're on `test.paysight.io`).
+- Add a Paysight card to Settings → Integrations (currently env-configured).
+
+### ✅ Phase 6b — Migration blend + manual sync + cron rework (DONE — Jun 10 2026)
+Evidence from the data (and confirmed by inspection): subscriptions **migrated
+Phoenix → Paysight around Jun 6 2026**. Phoenix's transaction-history has no
+Jun 6/7/9/10 data; Paysight has full activity those days.
+
+- **Migration blend**: the subscription bucket now uses **Paysight preferred,
+  Phoenix fallback** per date — on any day Paysight has data we use it,
+  otherwise Phoenix. No double-count (never summed), no migration gap. Applied
+  consistently across all three surfaces:
+  - Dashboard `/` blended table (`loadBlendedDashboardData`)
+  - Stores `/pnl` ledger (`loadPnlLedger`)
+  - Subscriptions `/subscriptions` ledger (`buildLedger`)
+  - New helper: `loadPaysightSubsByDate()` in `src/lib/paysight/queries.ts`.
+  - Verified live (Playwright): Jun 6/7/9/10 Subs Rev now populated; previously
+    red-negative rows are green again.
+- **Manual "Sync Data" button** on `/pnl`: opens a modal with single-date or
+  date-range picker, re-pulls that window from Shopify + Paysight + Phoenix on
+  demand (`/api/sync/manual`, session-authed, 31-day cap). Built because data
+  can look "missing" simply when new transactions land after the last sync.
+- **Cron rework** (replaces the per-source crons):
+  - `/api/cron/sync-hourly` (`0 * * * *`) — last 3 days, all sources.
+  - `/api/cron/sync-daily-full` (`30 6 * * *`) — prev-month-start → today full
+    backfill, all sources; Phoenix revenue walk is chunked + time-boxed and
+    resumes across fires.
 
 ### ⏸️ Phase 7 — Dropshipping Re-enable (DEFERRED ~1 month)
 - Client paused dropshipping to focus on subscriptions
@@ -191,12 +237,19 @@ ROAS          = total_revenue / ad_spend
 
 ## 8. Outstanding / Known Items
 
-- [ ] **Phoenix ↔ Paysight sync** — awaiting Paysight access + spec (Phase 6)
-- [ ] **Deploy latest code to Vercel** — the sync bug fix + DB-credential code is
-      verified locally; production cron still needs the deploy to stop the
-      nightly re-introduction of the old bug
+- [ ] **Deploy latest code + env vars to Vercel** — Paysight integration,
+      migration blend, sync button, and the reworked crons are verified locally
+      but need a deploy. Production env must include `CREDENTIAL_ENCRYPTION_KEY`,
+      `PAYSIGHT_*`, `SOLVPATH_*`, and `ANTHROPIC_*` or sync + AI chat will fail.
+- [ ] **Paysight production URL** — currently on `test.paysight.io`; confirm
+      with client and switch `PAYSIGHT_BASE_URL`.
 - [ ] **Legacy OAuth stores** (ELEGIAR, VELLEDO, etc.) — re-encrypt their secrets
-      with the current key if they need to go active
-- [ ] **Dropshipping re-enable** — deferred ~1 month per client (Phase 7)
+      with the current key if they need to go active.
+- [ ] **Dropshipping re-enable** — deferred ~1 month per client (Phase 7).
 - [ ] `read_customers` scope on OAuth apps — optional, only needed if customer
-      name/email must appear in the expand panel for ELARA/SOLEN/VOLEN
+      name/email must appear in the expand panel for ELARA/SOLEN/VOLEN.
+- [ ] **Phoenix `revenue_recurring` shows $0** on recent days — under
+      investigation; likely the Phoenix transaction-history simply has no
+      recurring rows for migrated subscribers (they rebill on Paysight now).
+      The migration blend already surfaces the correct Paysight revenue, so
+      this no longer affects the dashboard totals.

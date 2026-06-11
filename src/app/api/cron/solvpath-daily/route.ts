@@ -194,7 +194,7 @@ async function handle(req: NextRequest) {
             subscribers_in_salvage: null,
             raw_json: { source: "cron.solvpath-daily", counts },
           },
-          { onConflict: "store_id,range_from,range_to" },
+          { onConflict: "tenant_id,store_id,range_from,range_to" },
         );
       portfolio = pErr ? { error: pErr.message } : counts;
     } catch (e) {

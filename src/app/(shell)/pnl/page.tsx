@@ -6,6 +6,7 @@ import { fmtDate, fmtPct } from "@/lib/format";
 import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
 import { ExpandableLedger } from "@/components/pnl/ExpandableLedger";
+import { SyncDataButton } from "@/components/pnl/SyncDataButton";
 
 export const dynamic = "force-dynamic";
 
@@ -179,6 +180,7 @@ export default async function PnlPage({
               );
             })}
           </div>
+          <SyncDataButton />
           <Link href={exportHref} className="primary-btn">
             <Download size={13} strokeWidth={2} />
             Export CSV

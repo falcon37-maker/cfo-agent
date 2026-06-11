@@ -609,7 +609,7 @@ async function persistSeenCustomers(
       scraped_at: new Date().toISOString(),
       raw_json: { customerIds: [...ids].sort((a, b) => a - b) },
     },
-    { onConflict: "store_id,range_from,range_to" },
+    { onConflict: "tenant_id,store_id,range_from,range_to" },
   );
   if (error) throw new Error(`persistSeenCustomers: ${error.message}`);
 }
@@ -700,7 +700,7 @@ async function mergePerDaySnapshots(
 
   const { error } = await sb
     .from("phx_summary_snapshots")
-    .upsert(rows, { onConflict: "store_id,range_from,range_to" });
+    .upsert(rows, { onConflict: "tenant_id,store_id,range_from,range_to" });
   if (error) throw new Error(`per-day snapshot upsert: ${error.message}`);
   return true;
 }

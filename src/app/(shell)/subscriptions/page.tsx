@@ -15,6 +15,10 @@ import {
   loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
+import {
+  loadPaysightSummary,
+  loadPaysightSubsByDate,
+} from "@/lib/paysight/queries";
 import { loadStores } from "@/lib/pnl/queries";
 import { requireTenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -22,6 +26,7 @@ import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
 import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SyncDataButton } from "@/components/pnl/SyncDataButton";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Subscriptions — CFO Agent" };
@@ -100,6 +105,7 @@ type LedgerRow = {
 function buildLedger(
   phxRows: PhxSnapshot[],
   pnlRows: DailyPnlRow[],
+  paysightByDate: Map<string, { subs: number; subOrders: number }>,
 ): LedgerRow[] {
   type Acc = {
     orders: number;
@@ -117,19 +123,39 @@ function buildLedger(
     }
     return m;
   };
+  // Phoenix per-day subs (fallback source).
+  const phxByDate = new Map<string, { revenue: number; orders: number }>();
   for (const r of phxRows) {
     if (!r.range_from || r.range_from !== r.range_to) continue;
     const d = r.range_from;
-    const m = get(d);
-    m.revenue +=
+    const rev =
       num(r.revenue_initial) +
       num(r.revenue_recurring) +
       num(r.revenue_salvage);
     const j = (r.raw_json as Record<string, unknown> | null) ?? {};
-    m.orders +=
+    const ord =
       Number(j.initialCount ?? 0) +
       Number(j.recurringCount ?? 0) +
       Number(j.salvageCount ?? 0);
+    const cur = phxByDate.get(d) ?? { revenue: 0, orders: 0 };
+    cur.revenue += rev;
+    cur.orders += ord;
+    phxByDate.set(d, cur);
+  }
+  // Subscription revenue per day: Paysight preferred, Phoenix fallback (same
+  // migration logic as the P&L ledger — subscriptions moved Phoenix→Paysight
+  // in Jun 2026, so use Paysight wherever it has data).
+  const allDates = new Set<string>([
+    ...phxByDate.keys(),
+    ...paysightByDate.keys(),
+  ]);
+  for (const d of allDates) {
+    const pay = paysightByDate.get(d);
+    const phx = phxByDate.get(d);
+    const usePay = !!pay && pay.subs > 0;
+    const m = get(d);
+    m.revenue += usePay ? pay!.subs : phx?.revenue ?? 0;
+    m.orders += usePay ? pay!.subOrders : phx?.orders ?? 0;
   }
   for (const r of pnlRows) {
     const m = get(r.date);
@@ -200,13 +226,16 @@ export default async function SubscriptionsOverviewPage({
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
-  const [snapshot, phxDays, pnlRows] = await Promise.all([
-    loadLatestPortfolioSnapshot(tenant.id),
-    loadPhxDailyRows(from, to, selectedPhx, tenant.id),
-    loadDailyPnl(from, to, selectedPhx, tenant.id),
-  ]);
+  const [snapshot, phxDays, pnlRows, paysight, paysightSubsByDate] =
+    await Promise.all([
+      loadLatestPortfolioSnapshot(tenant.id),
+      loadPhxDailyRows(from, to, selectedPhx, tenant.id),
+      loadDailyPnl(from, to, selectedPhx, tenant.id),
+      loadPaysightSummary(tenant.id, from, to),
+      loadPaysightSubsByDate(tenant.id, from, to, selectedPhx),
+    ]);
 
-  const ledger = buildLedger(phxDays, pnlRows);
+  const ledger = buildLedger(phxDays, pnlRows, paysightSubsByDate);
   const totals = sumLedger(ledger);
 
   // chips
@@ -293,6 +322,11 @@ export default async function SubscriptionsOverviewPage({
               </Link>
             ))}
           </div>
+          <SyncDataButton
+            sources={["paysight", "phoenix"]}
+            phoenixRevenue={false}
+            description="Re-pull subscription data from Paysight & Phoenix into the database."
+          />
         </div>
       </div>
 
@@ -380,9 +414,90 @@ export default async function SubscriptionsOverviewPage({
         </div>
       </div>
 
+      {/* ── Paysight (parallel subscription CRM) ── */}
+      {paysight.hasData ? (
+        <PaysightCard summary={paysight} rangeLabel={rangeLabel} />
+      ) : null}
+
       {/* ── Order mix ── */}
       {snapshot ? <OrderMix snapshot={snapshot} /> : null}
     </>
+  );
+}
+
+function PaysightCard({
+  summary,
+  rangeLabel,
+}: {
+  summary: import("@/lib/paysight/queries").PaysightSummary;
+  rangeLabel: string;
+}) {
+  return (
+    <div className="card table-card" style={{ marginTop: 16 }}>
+      <div className="card-head">
+        <div>
+          <div className="card-title">
+            Paysight · subscriptions{" "}
+            <span className="phx-orders-badge" title="Pulled from Paysight CRM">
+              CRM
+            </span>
+          </div>
+          <div className="card-sub">
+            {rangeLabel} · {summary.activeSubscribers} active subscribers ·
+            latest data {summary.latestTxnDate ?? "—"}
+          </div>
+        </div>
+      </div>
+
+      <div className="pnl-totals" style={{ padding: 14 }}>
+        <div className="total-tile">
+          <div className="total-label">Revenue (window)</div>
+          <div className="total-value">{fmtMoney(summary.revenue)}</div>
+        </div>
+        <div className="total-tile">
+          <div className="total-label">Successful Txns</div>
+          <div className="total-value">
+            {fmtInt(summary.successfulTransactions)}
+            <span style={{ color: "var(--muted)", fontSize: 12 }}>
+              {" "}/ {fmtInt(summary.totalTransactions)}
+            </span>
+          </div>
+        </div>
+        <div className="total-tile">
+          <div className="total-label">Active Subscribers</div>
+          <div className="total-value">{fmtInt(summary.activeSubscribers)}</div>
+        </div>
+        <div className="total-tile">
+          <div className="total-label">Refunds</div>
+          <div className="total-value">{fmtInt(summary.refundedCount)}</div>
+        </div>
+        <div className="total-tile">
+          <div className="total-label">Chargebacks</div>
+          <div className="total-value">{fmtInt(summary.chargebackCount)}</div>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="pnl-table">
+          <thead>
+            <tr>
+              <th>Store</th>
+              <th className="num">Revenue</th>
+              <th className="num">Transactions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.byStore.map((s) => (
+              <tr key={s.store}>
+                <td>{s.store}</td>
+                <td className="num">{fmtMoney(s.revenue)}</td>
+                <td className="num muted">{fmtInt(s.transactions)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

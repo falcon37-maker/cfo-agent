@@ -1,91 +1,138 @@
 # CFO Agent — Falcon 37
 
-Daily P&L + finance operations dashboard for Falcon 37 LLC's Shopify stores (NOVA, NURA, KOVA). Aggregates orders from Shopify + manually-entered ad spend + manually-entered COGS into a single daily P&L surface.
+Finance operations dashboard for Falcon 37 LLC. Consolidates two revenue
+engines into a single daily P&L:
+
+1. **Shopify storefronts** (dropshipping) — NOVA, NURA, KOVA, ELARA, SOLEN, VOLEN
+2. **Subscriptions** — billed via **Phoenix (Solvpath)** and **Paysight** CRMs
+
+Pulls live orders + subscription charges, blends in manually-entered ad spend
+and COGS, and produces per-store and consolidated daily P&L (revenue, gross
+profit, net profit, ROAS, margin) plus a subscription view.
+
+> For the full project history, phases, and roadmap see
+> [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).
 
 ## Stack
 
-- **Next.js 16** App Router, TypeScript, Tailwind v4
-- **Supabase** (Postgres) — service role on the server only
-- **Vercel** hosting
-- **Shopify Admin API** (GraphQL, `2025-01`) for orders
-- Manual entry pages for ad spend (`/ads`) and COGS (`/cogs`), password-gated
+- **Next.js 16** App Router, TypeScript
+- **Supabase** (Postgres) — service role on the server only; RLS for tenant isolation
+- **Vercel** hosting (Pro — for the hourly cron + >2 cron jobs)
+- **Shopify Admin API** (GraphQL `2025-01`) — static-token + OAuth client-credentials
+- **Solvpath / Phoenix** + **Paysight** APIs for subscriptions
 
-## Routes
+## Key routes
 
 | Path | Purpose |
 |---|---|
-| `/` | Dashboard: today KPIs, revenue-vs-ad-spend chart, store mix donut, 10d consolidated P&L |
-| `/pnl` | Filtered daily ledger + totals + CSV export |
-| `/settings` | Stores panel, rules panel (read-only) |
-| `/cogs` | Mobile password-gated form for Lara to enter daily COGS per store |
-| `/ads` | Mobile password-gated form for Lara to enter daily ad spend per store |
-| `/subscriptions`, `/cash`, `/accounting` | Stubs (Phase C — need Phoenix / Plaid / QuickBooks) |
-| `/api/sync/today?store=XXX` | Pull today's Shopify orders for one store |
-| `/api/sync/backfill?store=XXX&days=N` | Pull N days of Shopify orders + compute daily P&L |
-| `/api/import/csv?store=XXX` | One-time import of the historical Google-Sheet CSVs |
-| `/api/export/pnl?range=30d&store=all` | CSV download of the P&L ledger |
-| `/api/compute/pnl?store=XXX&date=YYYY-MM-DD` | Recompute P&L for a specific day |
+| `/` | Dashboard: KPIs, revenue pulse chart, subscription engine, blended daily P&L |
+| `/pnl` | Per-store daily ledger (expandable to Shopify orders) + CSV export + **Sync Data** button |
+| `/subscriptions` | Phoenix + Paysight subscription ledger and KPIs |
+| `/settings` | Stores (add/edit/test connection), integrations, COGS, rules |
+| `/cogs`, `/ads` | Mobile forms for daily COGS / ad-spend entry |
+
+### Sync APIs
+
+| Path | Auth | Purpose |
+|---|---|---|
+| `/api/cron/sync-hourly` | `CRON_SECRET` | Hourly: last 3 days, all sources (Shopify + Paysight + Phoenix counts) |
+| `/api/cron/sync-daily-full` | `CRON_SECRET` | Daily: prev-month-start → today full backfill, all sources |
+| `/api/sync/manual` | session | User-triggered (the Sync Data button) — re-pull a chosen date/range |
+| `/api/sync/paysight`, `/api/sync/solvpath` | `CRON_SECRET` | Per-source manual triggers (ping / sync / range) |
+| `/api/stores/test-connection` | session | Live-pings a store's Shopify creds (Connected / Invalid / Needs token) |
+| `/api/pnl/day-orders` | session | Orders behind a ledger day (powers the expand panel; reads `shopify_orders`) |
+| `/api/export/pnl` | session | CSV download of the P&L ledger |
 
 ## P&L formula
 
 ```
-revenue      = daily_orders.gross_sales (or CSV Revenue)
-cogs         = CSV Product Cost, OR manual /cogs entry, OR order_count × stores.default_cogs_per_order
-fees         = revenue × stores.processing_fee_pct (currently 10%)
-refunds      = daily_orders.refunds
-ad_spend     = Σ daily_ad_spend rows (manual entries via /ads, platform='facebook')
+# Shopify side (per store-day, from daily_orders → daily_pnl)
+revenue      = gross_sales − refunds          # = Shopify "Net sales"
+cogs         = order_count × default_cogs_per_order
+fees         = revenue × processing_fee_pct
 gross_profit = revenue − cogs
-net_profit   = revenue − cogs − fees − refunds − ad_spend
-margin_pct   = net_profit / revenue × 100
+net_profit   = revenue − cogs − fees − ad_spend
+
+# Subscription blend (NOVA / NURA / KOVA)
+# Source = Paysight preferred, Phoenix fallback (per date) — subscriptions
+# migrated Phoenix→Paysight Jun 2026, so we use whichever has data, never sum.
+subs_revenue       = Initial + Recurring + Salvage  (Paysight charges, or Phoenix)
+total_revenue      = revenue + upsell + subs_revenue
+subs_contribution  = subs_revenue × (1 − fee_rate)
+net_profit        += subs_contribution
+margin_pct         = net_profit / total_revenue × 100
+
+# Order count display
+orders shown = Shopify orders only; subscriptions shown as a "+N subs" badge
 ```
 
-## Schema
+## Credentials & security
 
-See `supabase/schema.sql` for the full create-from-scratch and `supabase/migrations/*.sql` for incremental changes. Run them in order in the Supabase SQL editor.
+- Shopify tokens / Paysight API key are **encrypted at rest** (AES-256-GCM) in
+  the `stores` / `integrations` tables. Never sent to the browser.
+- `CREDENTIAL_ENCRYPTION_KEY` decrypts them — **never lose it** (rotating means
+  decrypt-all-with-old → re-encrypt-with-new).
+- `SUPABASE_SERVICE_ROLE_KEY` is server-only.
+- Runtime credential resolution is **DB-first** (env-var fallback removed Jun 2026).
 
-Core tables:
-- `stores` — store registry + per-store defaults (fee rate, blended COGS)
-- `daily_orders` — per-store/day aggregates from Shopify
-- `daily_ad_spend` — per-store/day/platform (CSV-imported `facebook`, manual entries also `facebook`)
-- `products` — per-variant COGS (Phase A next pass)
-- `daily_pnl` — per-store/day rollup, authoritative for the dashboard
-- `cogs_entries`, `ad_spend_entries` — audit logs for manual submissions
+## Core tables
+
+- `stores` — registry + per-store fee/COGS defaults + encrypted Shopify creds
+- `daily_orders` — per-store/day Shopify aggregate
+- `shopify_orders` — per-order Shopify detail (powers the expand panel)
+- `daily_pnl` — per-store/day P&L rollup (authoritative for the dashboard)
+- `phx_summary_snapshots` — Phoenix/Solvpath per-day subscription revenue + counts
+- `paysight_transactions`, `paysight_subscriptions` — Paysight per-row data
+- `daily_ad_spend`, `cogs_entries`, `ad_spend_entries` — manual entry + audit
+- `integrations` — per-tenant encrypted Solvpath / Paysight / Chargeblast creds
+- `data_validation_log` — anomalies surfaced as the dashboard warning banner
+
+Schema lives in `supabase/schema.sql`; incremental changes in
+`supabase/migrations/*.sql` (apply in order; `scripts/apply-migration-*.mjs`).
 
 ## Local setup
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in the values below
+# create .env with the vars below
 npm run dev
 ```
-
-Apply migrations in order: `supabase/migrations/002_pnl_defaults.sql` → `003_pnl_order_count.sql` → `004_cogs_entries.sql` → `005_ad_spend_entries.sql`.
 
 ## Env vars
 
 | Var | Purpose |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase publishable key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server-only — bypasses RLS) |
+| `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` | Supabase project URL + publishable key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role (server-only) |
+| `DATABASE_URL` | Direct Postgres (edit-mode writes + migration/backfill scripts) |
+| `CREDENTIAL_ENCRYPTION_KEY` | AES-256 key for token encryption — **critical** |
 | `SHOPIFY_API_VERSION` | Pinned to `2025-01` |
-| `NOVA_DOMAIN`, `NOVA_TOKEN` | `f1ynhw-g0.myshopify.com` + `shpat_…` (scopes: `read_orders, read_products, read_inventory, read_customers`) |
-| `NURA_DOMAIN`, `NURA_TOKEN` | same for NURA |
-| `KOVA_DOMAIN`, `KOVA_TOKEN` | same for KOVA |
-| `COGS_PAGE_PASSWORD` | Shared password for `/cogs` and `/ads` |
+| `CRON_SECRET` | Authenticates Vercel cron requests |
+| `SOLVPATH_BASE_URL` / `_PARTNER_ID` / `_PARTNER_TOKEN` / `_BEARER_TOKEN` | Phoenix |
+| `PAYSIGHT_BASE_URL` / `_CLIENT_ID` / `_USER_EMAIL` / `_API_KEY` | Paysight |
+| `ANTHROPIC_API_KEY` / `_MODEL` / `_MAX_TOKENS` | AI chat |
 
-Add new stores with just two env pairs (`<CODE>_DOMAIN`, `<CODE>_TOKEN`) + a row in `stores` — no code changes required.
+Shopify per-store credentials live in the **DB** (Settings → Stores → Edit),
+not env vars. Add a new store from the UI — no code changes needed.
 
 ## Deploy to Vercel
 
-1. Import this repo in Vercel.
-2. Copy every env var above into Project → Settings → Environment Variables (Production + Preview).
-3. Deploy. No build-step tweaks needed — `npm run build` works out of the box.
-4. Point `cfo-agent.ai` at the Vercel project (Settings → Domains).
+1. Import the repo in Vercel (Pro plan for hourly cron).
+2. Add every env var above in Project → Settings → Environment Variables
+   (Production + Preview + Development). **`CREDENTIAL_ENCRYPTION_KEY` and the
+   `PAYSIGHT_*` / `SOLVPATH_*` keys are required** for sync to work.
+3. Deploy. Crons (`vercel.json`) start automatically:
+   - `sync-hourly` — every hour
+   - `sync-daily-full` — daily 06:30 UTC
+   - `data-validation` — daily 15:30 UTC
 
 ## Conventions
 
-- Store codes are uppercase (`NOVA`) and match `stores.id`.
-- Currency formatting: `Intl.NumberFormat` at render time — **never** round server-side.
-- `daily_pnl` is authoritative for the dashboard; `daily_orders` is raw Shopify aggregation only.
-- `.env*` files are gitignored. Don't commit any secrets.
+- Store codes are uppercase and match `stores.id`.
+- Backend day-bucketing + Shopify queries use each store's IANA timezone;
+  frontend P&L order times render in store-tz (Shopify-Admin parity).
+- Shopify GraphQL search timestamps **must be single-quoted** (embedded `:`
+  otherwise breaks the date filter — see `feedback-shopify-query-quoting`).
+- `daily_pnl` is authoritative for the dashboard; `daily_orders` is raw aggregation.
+- Currency formatted at render time — never round server-side.
+- `.env*` is gitignored. Never commit secrets.
