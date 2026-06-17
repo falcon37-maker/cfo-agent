@@ -32,6 +32,10 @@ type SyncDataButtonProps = {
    *  The Subscriptions page passes ["paysight","phoenix"] so it only refreshes
    *  the subscription side. */
   sources?: Array<"shopify" | "paysight" | "phoenix">;
+  /** Restrict the Shopify sync to these store IDs. Omit to sync all stores.
+   *  The Stores page passes the drop-ship stores so it doesn't also re-sync
+   *  the subscription stores (NOVA/NURA/KOVA). */
+  storeIds?: string[];
   /** Short blurb under the modal title describing what gets pulled. */
   description?: string;
   /** When false, the API skips the slow Phoenix per-customer revenue walk and
@@ -42,6 +46,7 @@ type SyncDataButtonProps = {
 
 export function SyncDataButton({
   sources,
+  storeIds,
   description,
   phoenixRevenue = true,
 }: SyncDataButtonProps = {}) {
@@ -53,16 +58,21 @@ export function SyncDataButton({
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pct, setPct] = useState(0);
+  const [phase, setPhase] = useState("");
 
   async function runSync() {
     setRunning(true);
     setResult(null);
     setError(null);
+    setPct(0);
+    setPhase("Starting…");
     try {
       const window = mode === "single" ? { from, to: from } : { from, to };
       const body = {
         ...window,
         ...(sources && sources.length ? { sources } : {}),
+        ...(storeIds && storeIds.length ? { storeIds } : {}),
         ...(phoenixRevenue ? {} : { phoenixRevenue: false }),
       };
       const r = await fetch("/api/sync/manual", {
@@ -70,13 +80,60 @@ export function SyncDataButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await r.json()) as SyncResult;
-      if (!r.ok || !data.ok) {
+
+      if (!r.ok || !r.body) {
+        // Validation errors (400/401) come back as plain JSON, not a stream.
+        const data = await r.json().catch(() => ({}));
         setError(data.error ?? "Sync failed. Please try again.");
-      } else {
-        setResult(data);
+        return;
+      }
+
+      // Read the NDJSON progress stream line by line.
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let done: SyncResult | null = null;
+      let streamErr: string | null = null;
+
+      for (;;) {
+        const { value, done: streamDone } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? ""; // keep the partial last line
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let evt: {
+            type: string;
+            pct?: number;
+            label?: string;
+            error?: string;
+          } & SyncResult;
+          try {
+            evt = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (evt.type === "progress") {
+            if (typeof evt.pct === "number") setPct(evt.pct);
+            if (evt.label) setPhase(evt.label);
+          } else if (evt.type === "done") {
+            done = evt;
+          } else if (evt.type === "error") {
+            streamErr = evt.error ?? "Sync failed.";
+          }
+        }
+      }
+
+      if (streamErr) {
+        setError(streamErr);
+      } else if (done) {
+        setPct(100);
+        setResult(done);
         // Refresh the ledger so the new numbers show without a manual reload.
         router.refresh();
+      } else {
+        setError("Sync ended unexpectedly. Please try again.");
       }
     } catch (e) {
       setError((e as Error).message);
@@ -185,6 +242,21 @@ export function SyncDataButton({
                   : "Pulls the latest Paysight transactions and Phoenix subscriber counts."}
               </p>
 
+              {running ? (
+                <div className="sync-progress">
+                  <div className="sync-progress-bar">
+                    <div
+                      className="sync-progress-fill"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <div className="sync-progress-meta">
+                    <span className="sync-progress-phase">{phase}</span>
+                    <span className="sync-progress-pct">{pct}%</span>
+                  </div>
+                </div>
+              ) : null}
+
               {error ? (
                 <div className="sync-result err">
                   <AlertCircle size={14} /> {error}
@@ -247,7 +319,7 @@ export function SyncDataButton({
                 {running ? (
                   <>
                     <Loader2 size={13} className="spin" />
-                    Syncing…
+                    Syncing… {pct}%
                   </>
                 ) : (
                   <>

@@ -40,7 +40,17 @@ type OrdersPage = {
   };
 };
 
-const ORDERS_QUERY = /* GraphQL */ `
+// Orders query, parameterized over whether the app has the `read_customers`
+// scope. Stores connected via a custom OAuth app that lacks `read_customers`
+// (e.g. the drop-ship stores SOLEN/VOLEN/ELARA) get ACCESS_DENIED on the
+// `customer` field, which fails the ENTIRE query and silently dropped their
+// sync. Customer name/email is order-detail nice-to-have, not needed for the
+// P&L numbers, so we omit it when the scope is missing and still sync revenue.
+function buildOrdersQuery(includeCustomer: boolean): string {
+  const customerField = includeCustomer
+    ? "customer { displayName email }"
+    : "";
+  return /* GraphQL */ `
   query DailyOrders($query: String!, $cursor: String) {
     orders(first: 100, query: $query, after: $cursor, sortKey: CREATED_AT) {
       pageInfo { hasNextPage endCursor }
@@ -54,7 +64,7 @@ const ORDERS_QUERY = /* GraphQL */ `
         sourceName
         displayFinancialStatus
         displayFulfillmentStatus
-        customer { displayName email }
+        ${customerField}
         channelInformation {
           displayName
           channelDefinition { channelName }
@@ -69,6 +79,16 @@ const ORDERS_QUERY = /* GraphQL */ `
     }
   }
 `;
+}
+
+const ORDERS_QUERY = buildOrdersQuery(true);
+const ORDERS_QUERY_NO_CUSTOMER = buildOrdersQuery(false);
+
+/** True when a GraphQL error is Shopify's missing-scope error for a field. */
+function isAccessScopeError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /ACCESS_DENIED|access scope|read_customers/i.test(msg);
+}
 
 function channelLabelFor(o: ShopifyOrder): string {
   const ch = o.channelInformation?.displayName?.trim();
@@ -185,6 +205,11 @@ export async function syncDailyOrders(
   let tax = 0;
   let currency = storeRow?.currency ?? "USD";
 
+  // Whether to request the `customer` field. Starts true; if Shopify returns
+  // an access-scope error (app lacks read_customers), we drop the field for
+  // this store and retry the same page — so revenue still syncs.
+  let includeCustomer = true;
+
   // Defense-in-depth: dedupe by order id. Shopify's cursor is usually
   // stable but order modifications mid-pagination can occasionally return
   // the same order twice. Cheap to skip the second occurrence.
@@ -203,10 +228,29 @@ export async function syncDailyOrders(
     // refs and silently drops one side of the range. Symptom: counts
     // explode (e.g. 48 → 101 for KOVA May 31) because only the lower
     // bound survives, leaving a half-infinite window.
-    const data: OrdersPage = await client.graphql<OrdersPage>(ORDERS_QUERY, {
+    const vars = {
       query: `created_at:>='${startIso}' created_at:<'${endIso}'`,
       cursor,
-    });
+    };
+    let data: OrdersPage;
+    try {
+      data = await client.graphql<OrdersPage>(
+        includeCustomer ? ORDERS_QUERY : ORDERS_QUERY_NO_CUSTOMER,
+        vars,
+      );
+    } catch (err) {
+      // App lacks read_customers — drop the customer field and retry the
+      // SAME page so this store's revenue still syncs (name/email stay null).
+      if (includeCustomer && isAccessScopeError(err)) {
+        includeCustomer = false;
+        data = await client.graphql<OrdersPage>(
+          ORDERS_QUERY_NO_CUSTOMER,
+          vars,
+        );
+      } else {
+        throw err;
+      }
+    }
 
     for (const o of data.orders.nodes) {
       // Skip cancelled orders — Shopify's Sales Report excludes them too.

@@ -8,6 +8,12 @@
 //   POST /api/sync/manual
 //   body: { from: "YYYY-MM-DD", to?: "YYYY-MM-DD" }   // to defaults to from
 //
+// Streams progress as newline-delimited JSON (NDJSON) so the Sync Data button
+// can show a live progress bar. Each line is one of:
+//   { type: "progress", pct, label }      — 0..100 overall %, current step
+//   { type: "done", ok, ...result }       — final summary (last line)
+//   { type: "error", error }              — fatal error
+//
 // Sources:
 //   • Shopify  — daily_orders + daily_pnl per store, per day
 //   • Paysight — subscriptions + transactions, per day
@@ -92,6 +98,7 @@ export async function POST(req: NextRequest) {
     from?: string;
     to?: string;
     sources?: string[]; // optional subset; default all
+    storeIds?: string[]; // optional Shopify store subset; default all stores
     // When false, skip the heavy Phoenix per-customer revenue walk and only
     // refresh the fast PORTFOLIO subscriber counts. The Subscriptions quick-
     // sync passes false so the click returns in seconds; the daily cron still
@@ -123,117 +130,194 @@ export async function POST(req: NextRequest) {
     ).map((s) => s.toLowerCase()),
   );
 
+  // Optional Shopify store filter. The Stores page passes its drop-ship store
+  // IDs so a "Sync Now" there doesn't also re-sync the subscription stores.
+  const storeFilter =
+    body?.storeIds && body.storeIds.length
+      ? new Set(body.storeIds.map((s) => s.toUpperCase()))
+      : null;
+
+  const tenantId = tenant.id;
   const started = Date.now();
-  const sb = supabaseAdmin();
-  const result: Record<string, unknown> = { from, to, days: dates.length };
+  const encoder = new TextEncoder();
 
-  // ── Shopify ──
-  if (sources.has("shopify")) {
-    const { data: stores } = await sb
-      .from("stores")
-      .select("id")
-      .eq("tenant_id", tenant.id)
-      .eq("is_active", true)
-      .neq("id", "PORTFOLIO")
-      .neq("id", "__BACKFILL_DEDUPE__");
-    let orders = 0;
-    let failed = 0;
-    const perStore: Record<string, number> = {};
-    for (const store of stores ?? []) {
-      if (!(await hasStoreCreds(store.id, tenant.id))) continue;
-      for (const date of dates) {
-        try {
-          const pull = await syncDailyOrders(store.id, date, tenant.id);
-          await computeDailyPnl(store.id, date, tenant.id);
-          orders += pull.orderCount;
-          perStore[store.id] = (perStore[store.id] ?? 0) + pull.orderCount;
-        } catch {
-          failed++;
-        }
-      }
-    }
-    result.shopify = { orders, failed, perStore };
-  }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (obj: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      };
+      // Overall progress is split into weighted phases so the bar advances
+      // smoothly across sources. Each active source gets an equal slice;
+      // within a source we interpolate by units done / units total.
+      const activePhases = [
+        sources.has("shopify") ? "shopify" : null,
+        sources.has("paysight") ? "paysight" : null,
+        sources.has("phoenix") ? "phoenix" : null,
+      ].filter(Boolean) as string[];
+      const slice = activePhases.length ? 100 / activePhases.length : 100;
+      let phaseBase = 0; // % already completed by earlier phases
+      const emit = (frac: number, label: string) => {
+        const pct = Math.min(99, Math.round(phaseBase + slice * frac));
+        send({ type: "progress", pct, label });
+      };
 
-  // ── Paysight ──
-  if (sources.has("paysight")) {
-    const creds = await getPaysightCreds(tenant.id);
-    if (creds) {
-      let subs = 0;
-      let tx = 0;
-      let failed = 0;
-      for (const date of dates) {
-        try {
-          const r = await syncPaysightDay(tenant.id, date);
-          subs += r.subscriptionsUpserted;
-          tx += r.transactionsUpserted;
-        } catch {
-          failed++;
-        }
-      }
-      result.paysight = { subs, tx, failed };
-    } else {
-      result.paysight = { skipped: "no creds" };
-    }
-  }
+      const sb = supabaseAdmin();
+      const result: Record<string, unknown> = { from, to, days: dates.length };
 
-  // ── Phoenix ──
-  if (sources.has("phoenix")) {
-    const creds = await getSolvpathCreds(tenant.id);
-    if (creds) {
-      let counts: Record<string, number> | null = null;
       try {
-        counts = await refreshPhoenixCounts(tenant.id);
-      } catch {
-        /* ignore — counts are best-effort */
-      }
-      if (!doPhoenixRevenue) {
-        // Fast path (Subscriptions quick-sync): counts only, no revenue walk.
-        result.phoenix = {
-          activeSubscribers: counts?.["Active"] ?? null,
-          revenueWalk: "skipped (counts only)",
-          chunks: 0,
-        };
-      } else {
-        // Revenue walk, time-boxed. Resumes across calls via persisted cursor.
-        let startStatus:
-          | "Active"
-          | "Canceled"
-          | "Never Enrolled"
-          | undefined;
-        let startPage: number | undefined;
-        let chunks = 0;
-        let finished = false;
-        while (Date.now() - started < PHX_BUDGET_MS) {
-          const r = await backfillRevenueForRange({
-            tenantId: tenant.id,
-            from,
-            to,
-            deadlineMs: 55_000,
-            startStatus,
-            startPage,
-          });
-          chunks++;
-          if (r.progress.finished) {
-            finished = true;
-            break;
+        // ── Shopify ──
+        if (sources.has("shopify")) {
+          emit(0, "Shopify — preparing…");
+          const { data: stores } = await sb
+            .from("stores")
+            .select("id")
+            .eq("tenant_id", tenantId)
+            .eq("is_active", true)
+            .neq("id", "PORTFOLIO")
+            .neq("id", "__BACKFILL_DEDUPE__");
+          const storeList = (stores ?? []).filter(
+            (s) => !storeFilter || storeFilter.has(s.id.toUpperCase()),
+          );
+          const totalUnits = storeList.length * dates.length || 1;
+          let unit = 0;
+          let orders = 0;
+          let failed = 0;
+          const perStore: Record<string, number> = {};
+          for (const store of storeList) {
+            if (!(await hasStoreCreds(store.id, tenantId))) {
+              unit += dates.length;
+              continue;
+            }
+            for (const date of dates) {
+              try {
+                const pull = await syncDailyOrders(store.id, date, tenantId);
+                await computeDailyPnl(store.id, date, tenantId);
+                orders += pull.orderCount;
+                perStore[store.id] = (perStore[store.id] ?? 0) + pull.orderCount;
+              } catch {
+                failed++;
+              }
+              unit++;
+              emit(unit / totalUnits, `Shopify — ${store.id} ${date}`);
+            }
           }
-          startStatus = r.progress.nextStatus ?? undefined;
-          startPage = r.progress.nextPage ?? undefined;
+          result.shopify = { orders, failed, perStore };
+          phaseBase += slice;
         }
-        result.phoenix = {
-          activeSubscribers: counts?.["Active"] ?? null,
-          revenueWalk: finished
-            ? "finished"
-            : "time-boxed (run again to continue)",
-          chunks,
-        };
-      }
-    } else {
-      result.phoenix = { skipped: "no creds" };
-    }
-  }
 
-  result.elapsedMs = Date.now() - started;
-  return NextResponse.json({ ok: true, ...result });
+        // ── Paysight ──
+        if (sources.has("paysight")) {
+          emit(0, "Paysight — preparing…");
+          const creds = await getPaysightCreds(tenantId);
+          if (creds) {
+            let subs = 0;
+            let tx = 0;
+            let failed = 0;
+            let unit = 0;
+            for (const date of dates) {
+              try {
+                const r = await syncPaysightDay(tenantId, date);
+                subs += r.subscriptionsUpserted;
+                tx += r.transactionsUpserted;
+              } catch {
+                failed++;
+              }
+              unit++;
+              emit(unit / dates.length, `Paysight — ${date}`);
+            }
+            result.paysight = { subs, tx, failed };
+          } else {
+            result.paysight = { skipped: "no creds" };
+          }
+          phaseBase += slice;
+        }
+
+        // ── Phoenix ──
+        if (sources.has("phoenix")) {
+          emit(0, "Phoenix — subscriber counts…");
+          const creds = await getSolvpathCreds(tenantId);
+          if (creds) {
+            let counts: Record<string, number> | null = null;
+            try {
+              counts = await refreshPhoenixCounts(tenantId);
+            } catch {
+              /* ignore — counts are best-effort */
+            }
+            if (!doPhoenixRevenue) {
+              emit(1, "Phoenix — counts done");
+              result.phoenix = {
+                activeSubscribers: counts?.["Active"] ?? null,
+                revenueWalk: "skipped (counts only)",
+                chunks: 0,
+              };
+            } else {
+              // Revenue walk is open-ended (~5700 customers across chunks); we
+              // can't know the total up front, so we approach 100% smoothly
+              // (each chunk closes part of the remaining gap) rather than
+              // claiming an exact %.
+              let startStatus:
+                | "Active"
+                | "Canceled"
+                | "Never Enrolled"
+                | undefined;
+              let startPage: number | undefined;
+              let chunks = 0;
+              let finished = false;
+              let seenTotal = 0;
+              while (Date.now() - started < PHX_BUDGET_MS) {
+                const r = await backfillRevenueForRange({
+                  tenantId,
+                  from,
+                  to,
+                  deadlineMs: 55_000,
+                  startStatus,
+                  startPage,
+                });
+                chunks++;
+                seenTotal += r.progress.customersSeen ?? 0;
+                if (r.progress.finished) {
+                  finished = true;
+                  emit(1, "Phoenix — revenue walk done");
+                  break;
+                }
+                startStatus = r.progress.nextStatus ?? undefined;
+                startPage = r.progress.nextPage ?? undefined;
+                // Asymptotic: 1 - 0.6^chunks closes 40% of the gap each chunk.
+                emit(
+                  1 - Math.pow(0.6, chunks),
+                  `Phoenix — revenue walk (${seenTotal} customers)`,
+                );
+              }
+              result.phoenix = {
+                activeSubscribers: counts?.["Active"] ?? null,
+                revenueWalk: finished
+                  ? "finished"
+                  : "time-boxed (run again to continue)",
+                chunks,
+              };
+            }
+          } else {
+            result.phoenix = { skipped: "no creds" };
+          }
+          phaseBase += slice;
+        }
+
+        result.elapsedMs = Date.now() - started;
+        send({ type: "progress", pct: 100, label: "Done" });
+        send({ type: "done", ok: true, ...result });
+      } catch (e) {
+        send({ type: "error", error: (e as Error).message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

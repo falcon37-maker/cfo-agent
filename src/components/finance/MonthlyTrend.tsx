@@ -51,7 +51,8 @@ export function FinanceMonthlyTrend({ months }: { months: MonthRow[] }) {
     <div style={{ width: "100%", overflow: "hidden" }}>
       <svg
         width="100%"
-        height="auto"
+        height={H}
+        style={{ height: "auto", display: "block" }}
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         role="img"

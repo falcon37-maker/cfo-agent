@@ -26,11 +26,11 @@ export const metadata: Metadata = {
 };
 
 // Inline boot script: set data-theme from localStorage before paint to avoid
-// a flash of the wrong theme. Falls back to system preference, then dark.
+// a flash of the wrong theme. Default is ALWAYS dark (Paysight-style); we only
+// honour a light theme if the user explicitly toggled to it.
 const themeBootScript = `
 (function(){try{
-  var ls = localStorage.getItem('theme');
-  var pref = ls || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  var pref = localStorage.getItem('theme') || 'dark';
   document.documentElement.setAttribute('data-theme', pref);
 }catch(e){document.documentElement.setAttribute('data-theme','dark');}})();
 `;
@@ -39,7 +39,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${jetbrains.variable} ${lato.variable}`}>
+    <html lang="en" data-theme="dark" suppressHydrationWarning className={`${inter.variable} ${jetbrains.variable} ${lato.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>

@@ -9,9 +9,11 @@
 //   - ClientId:      <tenant/parent-company id, e.g. 505>
 //   - UserEmail:     <requesting user's email>
 //
-// Endpoints we use (mitigation API — works for bulk pulls):
+// Endpoints we use:
 //   POST /api/mitigation/subscriptions   (active + inactive subs, max 1 day/window)
-//   POST /api/mitigation/transactions    (transactions, max 7 day/window)
+//   POST /api/transactions/search        (ADMIN search — transactions with
+//        paymentNumber/attempt/subId/storeName, max 7 day/window; the
+//        mitigation transactions endpoint omits those fields)
 //
 // Rate limits: 100 req/min global; 40 req/min for broad transaction searches.
 
@@ -66,6 +68,17 @@ export type PaysightTransaction = {
   hasAlert: boolean;
   chargedBack: boolean;
   originalTransactionId: string | null;
+  // ── Admin-API-only fields (/api/transactions/search) ──
+  // The Mitigation API omits these; the Admin search returns them. They are
+  // what lets us split "newly acquired" checkout orders from BILLED rebills.
+  /** Billing cycle: 0 = initial checkout order, >= 1 = recurring rebill. */
+  paymentNumber?: number;
+  /** Billing attempt: 1 = natural, 2+ = retry/salvage. */
+  attempt?: number;
+  /** Owning subscription id (0 = none). */
+  subId?: number;
+  /** Paysight's store label, e.g. "KOVA" / "NURA" / "NOVA USA". */
+  storeName?: string;
 };
 
 type SubscriptionResponse = {
@@ -178,6 +191,12 @@ export async function searchSubscriptions(
 
 /**
  * Fetch one page of transactions for a date window.
+ *
+ * Uses the ADMIN search (/api/transactions/search), not the Mitigation one:
+ * same auth + response shape, but each row additionally carries
+ * paymentNumber (billing cycle), attempt, subId and storeName — required to
+ * separate newly-acquired checkout orders from billed rebills (client spec
+ * Jun 2026: "Subs Rev = only what was billed that day from subs").
  * Broad (date-only) searches are capped at 7 days (dateFrom..dateTo) and
  * rate-limited to 40 req/min.
  */
@@ -195,7 +214,7 @@ export async function searchTransactions(
 ): Promise<TransactionResponse> {
   return paysightPost<TransactionResponse>(
     tenantId,
-    "/api/mitigation/transactions",
+    "/api/transactions/search",
     {
       pageNumber: params.pageNumber,
       limit: params.limit ?? DEFAULT_LIMIT,

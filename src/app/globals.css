@@ -1,33 +1,38 @@
 @import "tailwindcss";
 
-/* ═══ Design tokens (from Claude Design handoff) ═══ */
+/* ═══ Design tokens — Paysight-matched dark theme (see PAYSIGHT_UI_SPEC.md) ═══ */
 :root[data-theme="dark"] {
-  --bg: #0a0a0a;
-  --surface: #111113;
-  --surface-2: #161619;
-  --surface-3: #1c1d21;
-  --surface-inset: #0d0d0f;
-  --border: #1f2024;
-  --border-strong: #2a2b30;
-  --text: #e8e8ea;
-  --text-dim: #b6b8bd;
-  --muted: #71757c;
+  --bg: #111113;
+  --surface: #18191b;
+  --surface-2: #1c1d20;
+  --surface-3: #212226;
+  --surface-inset: #0e0e10;
+  --border: #363a3f;
+  --border-strong: #43474d;
+  --text: #edeef0;
+  --text-dim: #a1a6ad;
+  --muted: #6b7079;
   --muted-strong: #9aa0a6;
 
-  --accent: #00d463;
-  --accent-strong: #00f26f;
-  --accent-dim: #008a42;
-  --accent-bg: rgba(0, 212, 99, 0.12);
-  --accent-bg-strong: rgba(0, 212, 99, 0.2);
-  --negative: #ff4d5e;
-  --negative-bg: rgba(255, 77, 94, 0.12);
-  --warning: #ffb020;
+  /* Indigo accent (Paysight) */
+  --accent: #5151cd;
+  --accent-strong: #6366f1;
+  --accent-dim: #312e81;
+  --accent-bg: rgba(81, 81, 205, 0.14);
+  --accent-bg-strong: rgba(81, 81, 205, 0.24);
+  --negative: #e11d48;
+  --negative-bg: rgba(225, 29, 72, 0.14);
+  --warning: #f59e0b;
+  /* Positive money/metrics stay green (Paysight shows gains in green even
+     though the brand accent is indigo). */
+  --positive: #10b981;
+  --positive-bg: rgba(16, 185, 129, 0.14);
 
-  --on-accent: #062611;
+  --on-accent: #ffffff;
 
-  --radius: 14px;
-  --radius-sm: 10px;
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.3);
+  --radius: 10px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
 :root[data-theme="light"] {
@@ -43,14 +48,16 @@
   --muted: #8a8e96;
   --muted-strong: #6b7079;
 
-  --accent: #00a84f;
-  --accent-strong: #00c853;
-  --accent-dim: #007a39;
-  --accent-bg: rgba(0, 168, 79, 0.1);
-  --accent-bg-strong: rgba(0, 168, 79, 0.16);
+  --accent: #4f46e5;
+  --accent-strong: #4338ca;
+  --accent-dim: #6366f1;
+  --accent-bg: rgba(79, 70, 229, 0.1);
+  --accent-bg-strong: rgba(79, 70, 229, 0.16);
   --negative: #e02c3f;
   --negative-bg: rgba(224, 44, 63, 0.08);
   --warning: #c47b00;
+  --positive: #059669;
+  --positive-bg: rgba(5, 150, 105, 0.1);
 
   --on-accent: #ffffff;
 
@@ -65,6 +72,33 @@ body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
+
+/* ═══ Thin custom scrollbars (Paysight-style) — subtle, theme-aware ═══ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 kbd {
   font-family: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 10px;
@@ -155,6 +189,14 @@ kbd {
   flex-direction: column;
   gap: 2px;
 }
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-group + .sidebar-group {
+  margin-top: 12px;
+}
 .nav-item {
   display: flex;
   align-items: center;
@@ -222,19 +264,19 @@ kbd {
 .agent-pulse span {
   position: absolute;
   inset: 0;
-  background: var(--accent);
+  background: var(--positive);
   border-radius: 50%;
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(0, 212, 99, 0.6);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
   }
   70% {
-    box-shadow: 0 0 0 8px rgba(0, 212, 99, 0);
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(0, 212, 99, 0);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
   }
 }
 .agent-title {
@@ -434,14 +476,69 @@ kbd {
 
 /* ═══ Content frame ═══ */
 .content {
-  padding: 18px 24px 32px;
+  padding: 22px 32px 40px;
   display: flex;
   flex-direction: column;
   gap: 20px;
   overflow-x: hidden;
+  /* Cap content width and centre it so wide monitors don't leave a big empty
+     gutter on one side (content was left-aligning inside a full-width area). */
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
 }
+/* ═══ Chart cards (ApexCharts) ═══ */
+.chart-card {
+  padding: 16px 18px 8px;
+}
+.chart-card-head {
+  margin-bottom: 6px;
+}
+.chart-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+@media (max-width: 900px) {
+  .chart-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.chart-skeleton {
+  height: 280px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+/* ApexCharts tooltip/legend dark-theme overrides */
+.apexcharts-tooltip {
+  background: var(--surface-3) !important;
+  border: 1px solid var(--border-strong) !important;
+  box-shadow: var(--shadow) !important;
+}
+.apexcharts-tooltip-title {
+  background: var(--surface-2) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+.apexcharts-xaxistooltip, .apexcharts-yaxistooltip {
+  background: var(--surface-3) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text) !important;
+}
+
 .dashboard-narrow {
-  max-width: 1120px;
+  max-width: 1600px;
   margin-left: auto;
   margin-right: auto;
   width: 100%;
@@ -946,7 +1043,7 @@ kbd {
 
 /* ═══ Table ═══ */
 .table-wrap {
-  overflow-x: auto;
+  overflow: auto;
 }
 .pnl-table {
   width: 100%;
@@ -955,7 +1052,7 @@ kbd {
 }
 .pnl-table th,
 .pnl-table td {
-  padding: 11px 14px;
+  padding: 12px 14px;
   text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -967,6 +1064,10 @@ kbd {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: var(--surface-inset);
+  /* Sticky header (Paysight-style) — stays put while the body scrolls. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 .pnl-table td {
   color: var(--text-dim);
@@ -998,15 +1099,15 @@ kbd {
   font-size: 12px;
 }
 .pnl-table td.profit.pos .profit-pill {
-  background: var(--accent-bg);
-  color: var(--accent);
+  background: var(--positive-bg);
+  color: var(--positive);
 }
 .pnl-table td.profit.neg .profit-pill {
   background: var(--negative-bg);
   color: var(--negative);
 }
 .pnl-table td.roas.pos {
-  color: var(--accent);
+  color: var(--positive);
 }
 .pnl-table td.roas.neg {
   color: var(--negative);
@@ -1058,8 +1159,8 @@ kbd {
 .auth-left {
   position: relative;
   background:
-    radial-gradient(600px 400px at 20% 20%, rgba(0, 212, 99, 0.14), transparent 60%),
-    radial-gradient(500px 400px at 80% 80%, rgba(107, 123, 255, 0.08), transparent 60%),
+    radial-gradient(600px 400px at 20% 20%, rgba(81, 81, 205, 0.16), transparent 60%),
+    radial-gradient(500px 400px at 80% 80%, rgba(99, 102, 241, 0.1), transparent 60%),
     var(--surface);
   border-right: 1px solid var(--border);
   overflow: hidden;
@@ -3075,9 +3176,9 @@ kbd {
   letter-spacing: 0.06em;
 }
 .day-orders-table .pill-paid {
-  background: rgba(34, 197, 94, 0.12);
-  color: #15803d;
-  border-color: rgba(34, 197, 94, 0.3);
+  background: var(--positive-bg);
+  color: var(--positive);
+  border-color: rgba(16, 185, 129, 0.3);
 }
 .day-orders-table .pill-pending {
   background: rgba(245, 158, 11, 0.12);
@@ -3214,8 +3315,8 @@ kbd {
   border: 1px solid var(--accent, #16a34a);
 }
 .store-card-actions .primary-btn-sm:hover {
-  background: #15803d;
-  border-color: #15803d;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .spin {
@@ -3359,8 +3460,8 @@ kbd {
   background: var(--muted);
 }
 .auth-state.ok {
-  color: var(--accent, #15803d);
-  border-color: rgba(34, 197, 94, 0.3);
+  color: var(--positive);
+  border-color: rgba(16, 185, 129, 0.3);
   background: rgba(34, 197, 94, 0.08);
 }
 .auth-state.ok .dot {
@@ -3478,6 +3579,25 @@ kbd {
 .sync-field input[type="date"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 .sync-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sync-note { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 0; }
+.sync-progress { display: flex; flex-direction: column; gap: 7px; }
+.sync-progress-bar {
+  height: 8px; border-radius: 999px; overflow: hidden;
+  background: var(--border); width: 100%;
+}
+.sync-progress-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  transition: width 0.3s ease; min-width: 2%;
+}
+.sync-progress-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11.5px; gap: 10px;
+}
+.sync-progress-phase {
+  color: var(--text-dim); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 1;
+}
+.sync-progress-pct { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 .sync-result {
   font-size: 12.5px; border-radius: 9px; padding: 10px 12px;
   display: flex; flex-direction: column; gap: 6px;

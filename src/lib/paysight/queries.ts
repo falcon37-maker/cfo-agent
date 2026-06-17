@@ -117,17 +117,28 @@ export async function loadPaysightSummary(
 }
 
 export type PaysightDaySubs = {
-  /** Successful subscription-charge revenue for the day (excludes refund/
-   *  chargeback/alert application_ids 200/201/202). */
+  /** BILLED subscription revenue for the day — successful rebills only
+   *  (payment_number >= 1). Newly-acquired checkout orders (cycle 0) are
+   *  store revenue, not subscription billing, and are excluded. */
   subs: number;
-  /** Count of successful subscription charges that day. */
+  /** Count of successful billed charges that day. */
   subOrders: number;
 };
 
 /**
- * Per-date Paysight subscription revenue + order count for [from, to].
- * Used to blend into the P&L "Subs Rev" column (Paysight-preferred, with
- * Phoenix as the fallback — see loadPnlLedger). Keyed by YYYY-MM-DD.
+ * Per-date Paysight BILLED subscription revenue + charge count for [from, to].
+ *
+ * Client spec (Jun 2026): "Subs Rev = only what was billed that day from
+ * subs". A Paysight charge counts as billed when payment_number >= 1 (a
+ * recurring rebill of an existing subscription). Cycle-0 charges are the
+ * customer's first checkout purchase — newly-acquired revenue that already
+ * shows up as store revenue — so they're excluded here. Rows synced before
+ * the Admin-API switch have payment_number NULL and are excluded too (they
+ * are all cycle-0 checkout orders; verified Jun 2026).
+ *
+ * Adds ON TOP of Phoenix billed revenue in the P&L blend — each rebill is
+ * charged on exactly one platform, so the two never double-count.
+ * Keyed by YYYY-MM-DD.
  */
 export async function loadPaysightSubsByDate(
   tenantId: string,
@@ -144,15 +155,17 @@ export async function loadPaysightSubsByDate(
     amount: number | null;
     success: boolean | null;
     application_id: number | null;
+    payment_number: number | null;
   }> = [];
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     let q = sb
       .from("paysight_transactions")
-      .select("txn_date, amount, success, application_id, store_id")
+      .select("txn_date, amount, success, application_id, store_id, payment_number")
       .eq("tenant_id", tenantId)
       .gte("txn_date", from)
       .lte("txn_date", to)
+      .gte("payment_number", 1) // billed rebills only — see doc comment
       .order("txn_date", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (storeIds && storeIds.length) q = q.in("store_id", storeIds);

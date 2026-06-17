@@ -53,10 +53,15 @@ fees         = revenue × processing_fee_pct
 gross_profit = revenue − cogs
 net_profit   = revenue − cogs − fees − ad_spend
 
-# Subscription blend (NOVA / NURA / KOVA)
-# Source = Paysight preferred, Phoenix fallback (per date) — subscriptions
-# migrated Phoenix→Paysight Jun 2026, so we use whichever has data, never sum.
-subs_revenue       = Initial + Recurring + Salvage  (Paysight charges, or Phoenix)
+# Subscription blend (NOVA / NURA / KOVA) — BILLED revenue only
+# Client spec Jun 2026: "Subs Rev = only what was billed that day from subs".
+# Newly-acquired checkout charges are store revenue, NOT Subs Rev.
+#   Phoenix billed  = Initial + Recurring + Salvage (per-day snapshots)
+#   Paysight billed = successful rebills only (payment_number >= 1, via the
+#                     Admin search API; cycle 0 = new checkout order, excluded)
+# Sources are ADDITIVE — each rebill is charged on exactly one platform
+# (subs migrated Phoenix→Paysight Jun 2026), so they never double-count.
+subs_revenue       = phoenix_billed + paysight_billed
 total_revenue      = revenue + upsell + subs_revenue
 subs_contribution  = subs_revenue × (1 − fee_rate)
 net_profit        += subs_contribution

@@ -14,6 +14,12 @@ import { loadPaysightSubsByDate } from "@/lib/paysight/queries";
 // use Shopify Payments land here by default).
 const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
 
+// Per client spec (Jun 2026 meeting): the Stores page shows ONLY the Shopify
+// drop-shipping stores. NOVA/NURA/KOVA are subscription stores and live on the
+// Subscriptions page, so they're excluded from the Stores ledger.
+const DROPSHIP_FEE_RATE = 0.039; // ~3.9% processing fee for drop-ship stores
+const SUBS_FEE_RATE = 0.16; // ~16% processing fee for PHX subscriptions
+
 export type StoreInfo = {
   id: string;
   name: string;
@@ -118,6 +124,27 @@ export async function loadStores(tenantId: string): Promise<StoreInfo[]> {
     ...s,
     processing_fee_pct: Number(s.processing_fee_pct ?? 0),
   })) as StoreInfo[];
+}
+
+/** Per-store revenue totals for the window — feeds the dashboard donut.
+ *  Uses daily_pnl.revenue (Shopify checkout), aggregated by store. */
+export async function loadStoreRevenueBreakdown(
+  tenantId: string,
+  range: { days: number } | { from: string; to: string },
+): Promise<Array<{ store: string; revenue: number }>> {
+  const from =
+    "from" in range ? range.from : addDays(todayUtc(), -(range.days - 1));
+  const to = "from" in range ? range.to : todayUtc();
+  const rows = await loadPnlRowsInRange(from, to, tenantId);
+  const byStore = new Map<string, number>();
+  for (const r of rows) {
+    if (r.store_id === "PORTFOLIO" || r.store_id === "__BACKFILL_DEDUPE__") continue;
+    byStore.set(r.store_id, (byStore.get(r.store_id) ?? 0) + Number(r.revenue ?? 0));
+  }
+  return [...byStore.entries()]
+    .map(([store, revenue]) => ({ store, revenue: Math.round(revenue * 100) / 100 }))
+    .filter((s) => s.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue);
 }
 
 /** Fetch raw daily_pnl rows (one per store-day) in the inclusive [from, to] window. */
@@ -428,10 +455,10 @@ export async function loadBlendedDashboardData(
   const phxByDayCur = rollupPhxByDay(phxCur);
   const phxByDayPrior = rollupPhxByDay(phxPrior);
 
-  // Paysight subscription revenue per day — preferred source over Phoenix
-  // for the subs bucket (subscriptions migrated Phoenix→Paysight Jun 2026).
-  // Used in the blend below: on dates where Paysight has data we substitute
-  // its subscription revenue for Phoenix's, avoiding the migration gap.
+  // Paysight BILLED subscription revenue per day (rebills only — the loader
+  // filters payment_number >= 1). ADDED to Phoenix billed revenue: each
+  // rebill happens on exactly one platform, so no double-count. Cycle-0
+  // checkout charges are newly-acquired store revenue, not Subs Rev.
   const paysightCur = await loadPaysightSubsByDate(
     tenantId,
     from,
@@ -485,28 +512,24 @@ export async function loadBlendedDashboardData(
     const phxShop = aggregate(shopifyByDatePhx[cur] ?? []);
     const phx = phxByDayCur.get(cur) ?? emptyPhxDay;
 
-    // Subscription bucket: Paysight preferred, Phoenix fallback (migration).
-    // Substitute Paysight's subscription revenue + count for Phoenix's on
-    // any day Paysight has data; keep Phoenix's direct/upsell components.
+    // Subs bucket = BILLED only: Phoenix billed + Paysight rebills (additive
+    // — each charge is on exactly one platform). The loader already excludes
+    // cycle-0 newly-acquired checkout charges.
     const pay = paysightCur.get(cur);
-    const usePay = !!pay && pay.subs > 0;
-    const subs = usePay ? pay!.subs : phx.subs;
-    const subsBilled = usePay ? pay!.subOrders : phx.subsBilledCount;
-    // phx.total = direct + initial + recurring + salvage + upsell. Swap the
-    // subscription portion (initial+recurring+salvage = phx.subs) for the
-    // Paysight figure so the blended total reflects the live source.
-    const phxTotal = usePay ? phx.total - phx.subs + pay!.subs : phx.total;
+    const subs = phx.subs + (pay?.subs ?? 0);
+    const subsBilled = phx.subsBilledCount + (pay?.subOrders ?? 0);
 
-    // PHX stores' real net = subscription revenue − processor fees − the
-    // Shopify-side costs they still incur (logged ad_spend / cogs / refunds
-    // / fees). Without this subtraction the dashboard double-shows costs in
-    // the row while ignoring them in net profit.
-    const phxContribution =
-      phxTotal * (1 - feeRate)
-      - phxShop.ad_spend
-      - phxShop.cogs
-      - phxShop.refunds
-      - phxShop.fees;
+    // Money story (mirrors /pnl, post-migration): store revenue = Shopify
+    // checkout for ALL stores — PHX stores included, since that's where
+    // newly-acquired dollars live now. The subscription platforms add their
+    // BILLED revenue (+ legacy PHX upsell) on top. phxTotal is the
+    // subscription-platform slice only.
+    const phxTotal = subs + phx.upsell;
+
+    // PHX stores' contribution = their own Shopify net (checkout revenue −
+    // ad/cogs/fees/refunds, already rolled up in daily_pnl) + the billed
+    // subscription dollars net of processor fees.
+    const phxContribution = phxTotal * (1 - feeRate) + phxShop.net_profit;
     const nonPhxContribution = nonPhxShop.net_profit;
     const manual = manualByDayCur.get(cur) ?? 0;
     daily.push({
@@ -521,18 +544,14 @@ export async function loadBlendedDashboardData(
       phx_net_contribution: round2(phxContribution),
       phx_subs_billed: subsBilled,
       // Frontend = Shopify checkout revenue for PHX stores (one-time +
-      // subscription-enrollment dollars). Pre-classifier-fix this came
-      // from PHX revenue_direct, which lumped both kinds together; now
-      // enrollments correctly land in revenue_initial and revenue_direct
-      // is near zero, so we read the Shopify-side number directly. Total
-      // Revenue still uses phx.total (Solvpath as source of truth) so
-      // there's no double-count at the total level — just the same
-      // enrollment dollars surfacing in both Frontend and Subs columns.
+      // newly-acquired subscription enrollments — both ring up at checkout).
       phx_frontend_revenue: round2(phxShop.revenue),
       phx_subs_revenue: round2(subs),
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manual),
-      total_revenue: round2(nonPhxShop.revenue + phxTotal + manual),
+      // Total = every store's Shopify checkout + billed subscription revenue
+      // (+ legacy PHX upsell) + manual — same shape as the /pnl ledger.
+      total_revenue: round2(allShop.revenue + phxTotal + manual),
       total_net_profit: round2(nonPhxContribution + phxContribution + manual),
     });
     cur = addDays(cur, 1);
@@ -547,16 +566,12 @@ export async function loadBlendedDashboardData(
     const phxShop = aggregate(shopifyByDatePriorPhx[curP] ?? []);
     const phx = phxByDayPrior.get(curP) ?? emptyPhxDay;
     const payP = paysightPrior.get(curP);
-    const usePayP = !!payP && payP.subs > 0;
-    const subsP = usePayP ? payP!.subs : phx.subs;
-    const subsBilledP = usePayP ? payP!.subOrders : phx.subsBilledCount;
-    const phxTotalP = usePayP ? phx.total - phx.subs + payP!.subs : phx.total;
-    const phxContribution =
-      phxTotalP * (1 - feeRate)
-      - phxShop.ad_spend
-      - phxShop.cogs
-      - phxShop.refunds
-      - phxShop.fees;
+    const subsP = phx.subs + (payP?.subs ?? 0);
+    const subsBilledP = phx.subsBilledCount + (payP?.subOrders ?? 0);
+    // Same money story as the current loop: billed subs (+ upsell) on top of
+    // every store's Shopify checkout net.
+    const phxTotalP = subsP + phx.upsell;
+    const phxContribution = phxTotalP * (1 - feeRate) + phxShop.net_profit;
     const manualP = manualByDayPrior.get(curP) ?? 0;
     priorDaily.push({
       date: curP,
@@ -573,7 +588,7 @@ export async function loadBlendedDashboardData(
       phx_subs_revenue: round2(subsP),
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manualP),
-      total_revenue: round2(nonPhxShop.revenue + phxTotalP + manualP),
+      total_revenue: round2(allShop.revenue + phxTotalP + manualP),
       total_net_profit: round2(nonPhxShop.net_profit + phxContribution + manualP),
     });
     curP = addDays(curP, 1);
@@ -641,7 +656,14 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     phx_subs_billed += r.phx_subs_billed;
     manual_revenue += r.manual_revenue;
   }
-  const total_revenue = shopify_revenue + phx_revenue + manual_revenue;
+  // Total = non-PHX Shopify + PHX-store Shopify checkout (phx_frontend_revenue)
+  // + subscription-platform revenue (phx_revenue = billed subs + upsell) +
+  // manual. Earlier this omitted phx_frontend_revenue, so PHX stores' Shopify
+  // checkout dollars silently dropped out of Total Revenue (matched neither the
+  // per-day row total nor the store donut). phx_net_contribution already
+  // includes the PHX-store Shopify net, so net profit needs no extra term.
+  const total_revenue =
+    shopify_revenue + phx_frontend_revenue + phx_revenue + manual_revenue;
   const total_net_profit = shopify_net_profit + phx_net_contribution + manual_revenue;
   return {
     shopify_revenue: round2(shopify_revenue),
@@ -713,13 +735,20 @@ export async function loadPnlLedger(
   storeFilter: string | string[],
   tenantId: string,
 ): Promise<PnlLedger> {
-  const stores = await loadStores(tenantId);
-  const rows =
+  // Stores page = drop-ship stores only (exclude PHX subscription stores).
+  const stores = (await loadStores(tenantId)).filter(
+    (s) => !PHX_STORE_IDS.has(s.id),
+  );
+  const allRows =
     "from" in rangeSpec
       ? await loadPnlRowsInRange(rangeSpec.from, rangeSpec.to, tenantId)
       : await loadPnlRows(rangeSpec.days, tenantId);
+  // Drop any PHX-store rows so subscription stores never surface here.
+  const rows = allRows.filter((r) => !PHX_STORE_IDS.has(r.store_id));
 
-  const selected = normalizeStoreFilter(storeFilter);
+  const selected = normalizeStoreFilter(storeFilter).filter(
+    (id) => !PHX_STORE_IDS.has(id),
+  );
   const filtered =
     selected.length === 0
       ? rows
@@ -743,12 +772,12 @@ export async function loadPnlLedger(
   const winTo = "from" in rangeSpec ? rangeSpec.to : todayUtc();
   const phxRows = await loadPhxDailyRows(winFrom, winTo, phxStoresInFilter, tenantId);
 
-  // Paysight subscription revenue per date — same PHX-store filter. Used as
-  // the PREFERRED subscription source (Phoenix is the fallback) because the
-  // subscriptions migrated Phoenix → Paysight in Jun 2026: on any date where
-  // Paysight has data we use it, otherwise we fall back to Phoenix. This
-  // avoids both double-counting (on overlap days) and gaps (on migration
-  // days where Phoenix is empty).
+  // Paysight BILLED subscription revenue per date (rebills, payment_number
+  // >= 1) — same PHX-store filter. ADDED to Phoenix billed revenue: each
+  // rebill is charged on exactly one platform (subs migrated Phoenix →
+  // Paysight Jun 2026), so the two sources never overlap. Newly-acquired
+  // cycle-0 checkout charges are store revenue, NOT Subs Rev (client spec
+  // Jun 2026: "only what was billed that day from subs").
   const paysightByDate = await loadPaysightSubsByDate(
     tenantId,
     winFrom,
@@ -797,26 +826,37 @@ export async function loadPnlLedger(
     phxByDate.set(r.range_from, cur);
   }
 
-  const feeRate =
-    Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) ||
-    0.1;
+  // Drop-ship stores all bill through the same ~3.9% processor (client spec).
+  const feeRate = DROPSHIP_FEE_RATE;
 
   const byDate = groupByDate(filtered);
   const ordered = Object.keys(byDate).sort().reverse();
   const ledger: DailyRow[] = ordered.map((d) => {
-    const base = aggregate(byDate[d]);
+    const raw = aggregate(byDate[d]);
+    // Drop-ship stores: recompute fees at ~3.9% (client spec) instead of the
+    // per-store DB rate, and re-derive net profit so the two stay consistent.
+    const dropFees = raw.revenue * DROPSHIP_FEE_RATE;
+    const base: DailyRow = {
+      ...raw,
+      fees: dropFees,
+      net_profit: raw.revenue - raw.cogs - dropFees - raw.ad_spend,
+      margin_pct:
+        raw.revenue > 0
+          ? ((raw.revenue - raw.cogs - dropFees - raw.ad_spend) / raw.revenue) *
+            100
+          : 0,
+    };
     const phx = phxByDate.get(d);
     const pay = paysightByDate.get(d);
 
-    // ── Subscription source: Paysight preferred, Phoenix fallback ──
-    // On any date where Paysight has data, it's the source of truth (it's
-    // the platform subscriptions migrated to). Phoenix only fills dates
-    // before the migration where Paysight has nothing. Upsell stays a
-    // Phoenix concept (Paysight transactions don't carry an upsell split),
-    // so it's always taken from Phoenix.
-    const usePaysight = !!pay && pay.subs > 0;
-    const subs = usePaysight ? pay!.subs : phx?.subs ?? 0;
-    const subOrders = usePaysight ? pay!.subOrders : phx?.subOrders ?? 0;
+    // ── Subs Rev = BILLED only: Phoenix billed + Paysight rebills ──
+    // Phoenix bills its legacy subscribers (Initial + Recurring + Salvage);
+    // Paysight bills the migrated ones (rebills, payment_number >= 1 — the
+    // loader already filters). Each charge happens on exactly one platform,
+    // so the sources are additive with no double-count. Upsell stays a
+    // Phoenix concept and rolls into frontend revenue.
+    const subs = (phx?.subs ?? 0) + (pay?.subs ?? 0);
+    const subOrders = (phx?.subOrders ?? 0) + (pay?.subOrders ?? 0);
     const upsell = phx?.upsell ?? 0;
     const upsellOrders = phx?.upsellOrders ?? 0;
 

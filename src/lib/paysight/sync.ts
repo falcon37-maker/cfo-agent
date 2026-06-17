@@ -34,18 +34,65 @@ export function storeFromDescriptor(descriptor: string | null | undefined): stri
   return null;
 }
 
+// Paysight's own store label (Admin API `storeName`) → our store id. More
+// reliable than descriptor sniffing; descriptor stays as the fallback for
+// rows that predate the Admin-API switch.
+const STORE_BY_NAME: Record<string, string> = {
+  KOVA: "KOVA",
+  NURA: "NURA",
+  "NOVA USA": "NOVA",
+  NOVA: "NOVA",
+};
+
+export function resolveStoreId(
+  storeName: string | null | undefined,
+  descriptor: string | null | undefined,
+): string | null {
+  if (storeName) {
+    const mapped = STORE_BY_NAME[storeName.trim().toUpperCase()];
+    if (mapped) return mapped;
+  }
+  return storeFromDescriptor(descriptor);
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-// Derive the store-local date (YYYY-MM-DD) for a transaction. Paysight
-// timestamps are UTC; we currently bucket by UTC date (store-tz refinement
-// can come later once we confirm Paysight's timezone semantics with the
-// client). Falls back to `sent` if `completed` is missing.
-function txnDate(t: PaysightTransaction): string | null {
+// Per-store IANA timezone for Paysight day-bucketing. The PHX stores all run
+// on US Eastern; Paysight timestamps are UTC with no offset suffix, so a naive
+// UTC slice would push late-evening Eastern orders onto the *next* calendar
+// day and mismatch Shopify (which buckets in store-local time). Default to
+// store-local Eastern; unknown stores fall back to UTC.
+const STORE_TZ: Record<string, string> = {
+  NOVA: "America/New_York",
+  NURA: "America/New_York",
+  KOVA: "America/New_York",
+};
+
+// Derive the store-LOCAL date (YYYY-MM-DD) for a transaction so it buckets the
+// same way Shopify does. Paysight `completed`/`sent` are UTC (no offset), so we
+// parse them as UTC and reformat in the store's timezone. Falls back to `sent`
+// if `completed` is missing, and to a plain UTC slice if the tz is unknown.
+function txnDate(
+  t: PaysightTransaction,
+  storeId: string | null,
+): string | null {
   const iso = t.completed || t.sent;
   if (!iso) return null;
-  return iso.slice(0, 10);
+  const tz = (storeId && STORE_TZ[storeId]) || null;
+  if (!tz) return iso.slice(0, 10);
+  // Paysight strings carry no zone; treat them as UTC.
+  const utcIso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + "Z";
+  const d = new Date(utcIso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  // en-CA gives YYYY-MM-DD directly.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
 
 export type PaysightSyncResult = {
@@ -171,6 +218,9 @@ function transactionRow(
   tenantId: string,
   t: PaysightTransaction,
 ): Record<string, unknown> {
+  // Resolve once: store_id drives both the store mapping and the timezone the
+  // day is bucketed in (so it lines up with Shopify).
+  const storeId = resolveStoreId(t.storeName, t.descriptor);
   return {
     tenant_id: tenantId,
     paysight_transaction_id: t.transactionId,
@@ -179,7 +229,11 @@ function transactionRow(
     order_id: t.orderId ?? null,
     customer_id: t.customerId ?? null,
     application_id: t.applicationId ?? null,
-    store_id: storeFromDescriptor(t.descriptor),
+    store_id: storeId,
+    payment_number: t.paymentNumber ?? null,
+    attempt: t.attempt ?? null,
+    sub_id: t.subId ?? null,
+    store_name: t.storeName ?? null,
     mid: t.mid ?? null,
     descriptor: t.descriptor ?? null,
     amount: round2(Number(t.amount ?? 0)),
@@ -198,7 +252,7 @@ function transactionRow(
     last4: t.last4 ?? null,
     sent_at: t.sent ?? null,
     completed_at: t.completed ?? null,
-    txn_date: txnDate(t),
+    txn_date: txnDate(t, storeId),
     gateway: t.gateway ?? null,
     gateway_transaction_id: t.gatewayTransactionId ?? null,
     sandbox: Boolean(t.sandbox),

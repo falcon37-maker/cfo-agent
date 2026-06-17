@@ -1,12 +1,15 @@
-import { loadBlendedDashboardData } from "@/lib/pnl/queries";
+import {
+  loadBlendedDashboardData,
+  loadStoreRevenueBreakdown,
+} from "@/lib/pnl/queries";
 import { loadLatestPortfolioSnapshot } from "@/lib/phx/queries";
 import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
-import { RevenueChart } from "@/components/dashboard/RevenueChart";
-import { SourceMixDonut } from "@/components/dashboard/SourceMixDonut";
+import { RevenueAreaChart } from "@/components/charts/RevenueAreaChart";
+import { StoreDonutChart } from "@/components/charts/StoreDonutChart";
+import { SubsTrendChart } from "@/components/charts/SubsTrendChart";
 import { PnlTableWithRange } from "@/components/dashboard/PnlTableWithRange";
-import { BreakdownToggle } from "@/components/dashboard/BreakdownToggle";
 import { MiniBarChart } from "@/components/dashboard/MiniBarChart";
 import { Greeting } from "@/components/dashboard/Greeting";
 import { SegLink } from "@/components/pnl/SegLink";
@@ -63,11 +66,11 @@ export default async function TotalPnlDashboardPage({
 
   const tenant = await requireTenant();
 
-  const [data, tablePool, phx] = await Promise.all([
-    loadBlendedDashboardData(
-      tenant.id,
-      hasCustom ? { from: customFrom!, to: customTo! } : { days: range.days },
-    ),
+  const rangeSpec = hasCustom
+    ? { from: customFrom!, to: customTo! }
+    : { days: range.days };
+  const [data, tablePool, phx, storeBreakdown] = await Promise.all([
+    loadBlendedDashboardData(tenant.id, rangeSpec),
     // Table has its own range control — always load 90 days as the pool
     // and let the client filter.
     loadBlendedDashboardData(tenant.id, { days: 90 }),
@@ -75,6 +78,7 @@ export default async function TotalPnlDashboardPage({
       tenant.id,
       hasCustom ? { from: customFrom!, to: customTo! } : undefined,
     ),
+    loadStoreRevenueBreakdown(tenant.id, rangeSpec),
   ]);
 
   const t = data.periodTotals;
@@ -268,13 +272,42 @@ export default async function TotalPnlDashboardPage({
       {/* ─── REVENUE PULSE ─── */}
       <section>
         <div className="section-eyebrow">Revenue pulse</div>
-        <RevenueChart data={data.daily} />
-        <BreakdownToggle label="Show source breakdown">
-          <SourceMixDonut
-            shopify={t.shopify_revenue}
-            phx={t.phx_revenue}
+        <div className="card chart-card">
+          <div className="chart-card-head">
+            <div className="card-title">Revenue trend</div>
+            <div className="card-sub">Store revenue, billed subs &amp; ad spend over the period</div>
+          </div>
+          <RevenueAreaChart
+            data={data.daily.map((d) => ({
+              date: d.date,
+              // Store Revenue = ALL stores' Shopify checkout (non-PHX +
+              // PHX-store frontend), so the line matches the store donut and
+              // the Total Revenue KPI instead of dropping the PHX stores.
+              revenue: d.shopify_revenue + d.phx_frontend_revenue,
+              subs: d.phx_subs_revenue,
+              adSpend: d.shopify_ad_spend,
+            }))}
           />
-        </BreakdownToggle>
+        </div>
+
+        <div className="chart-grid-2">
+          <div className="card chart-card">
+            <div className="chart-card-head">
+              <div className="card-title">Revenue by store</div>
+              <div className="card-sub">Shopify checkout share, this period</div>
+            </div>
+            <StoreDonutChart data={storeBreakdown} />
+          </div>
+          <div className="card chart-card">
+            <div className="chart-card-head">
+              <div className="card-title">Billed subscriptions</div>
+              <div className="card-sub">PHX + Paysight rebills per day</div>
+            </div>
+            <SubsTrendChart
+              data={data.daily.map((d) => ({ date: d.date, subs: d.phx_subs_revenue }))}
+            />
+          </div>
+        </div>
       </section>
 
       {/* ─── DAILY P&L ─── (title + controls live inside the card) */}

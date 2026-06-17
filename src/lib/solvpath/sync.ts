@@ -130,6 +130,16 @@ export function classifyTransaction(
 
   // Match on Type first since it's the explicit label; fall back to
   // RecurringOrderCount for rows that left Type blank.
+  //
+  // Phoenix labels these explicitly (confirmed via Solvpath transaction CSV
+  // export, Jun 2026): "Vip Initial", "Initial Salvage", "Month 1/2 Salvage",
+  // and the recurring rebills as "1 Month" / "2 Month" / "3 Month" / "4 Month"
+  // etc. The "N Month" forms carry NO "recurring" keyword and don't always set
+  // RecurringOrderCount, so without the regex below ~$2.9k/day of real rebills
+  // fell into unknownTypes and silently dropped out of Subs Rev (client caught
+  // this). Order matters: salvage before initial (an "Initial Salvage" is a
+  // salvage retry, not a fresh enrollment).
+  const isMonthRebill = /\b\d+\s*month\b/.test(type); // "1 month", "3 month", …
   if (type.includes("salvage")) return { bucket: "salvage", amount: raw };
   if (type.includes("upsell")) return { bucket: "upsell", amount: raw };
   if (type.includes("initial")) return { bucket: "initial", amount: raw };
@@ -142,7 +152,9 @@ export function classifyTransaction(
     }
     return { bucket: "direct", amount: raw };
   }
-  if (type.includes("recurring") || isRebill) return { bucket: "recurring", amount: raw };
+  if (type.includes("recurring") || isMonthRebill || isRebill) {
+    return { bucket: "recurring", amount: raw };
+  }
 
   return null; // unrecognized — caller can log via unknownTypes
 }
@@ -218,11 +230,43 @@ const COUNT_KEY: Record<
 // snapshot row for (store_id, range), and returns a cursor for the next
 // invocation. A driver script loops until `finished: true`.
 
-// Vercel function cap is effectively 60s on this project (the 800s
-// project-level setting hasn't taken effect), so chunks need to fit in
-// that budget. PAGE_SIZE=10 gives each chunk ~50s of headroom for both
-// the customer iteration and per-day persistence.
-const PAGE_SIZE = 10;
+// /customers list latency is a flat ~6s per call regardless of Limit (the
+// cost is per-request overhead, not per-row), so a small page size was a
+// 25× waste: Limit=10 → ~570 pages, Limit=250 → ~16 pages for the same wall
+// time per page. We list 250 at a time, then fetch each customer's
+// transaction-history in bounded-concurrency batches (TX_CONCURRENCY) so the
+// fan-out never spikes into Phoenix's 429 rate limit even though the page
+// now holds 250 customers.
+const PAGE_SIZE = 250;
+
+// Max simultaneous /transaction-history requests. Each list page now yields
+// up to 250 customers; firing 250 history calls at once trips Phoenix's
+// rate limiter. 15 keeps throughput high while staying under the limit.
+const TX_CONCURRENCY = 15;
+
+/**
+ * Map over `items` running at most `limit` async tasks at a time. Preserves
+ * input order in the returned array. Used to bound the transaction-history
+ * fan-out per page so we don't 429 Phoenix.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
 
 export type BackfillOptions = {
   /** Tenant whose phx_summary_snapshots rows are written / overwritten. */
@@ -295,7 +339,10 @@ export async function backfillRevenueForRange(
   const throttle = opts.throttleMs ?? 150;
   const fromIso = `${opts.from}T00:00:00.000Z`;
   const toIso = `${opts.to}T23:59:59.999Z`;
-  const maxCustomers = opts.maxCustomers ?? 500;
+  // With PAGE_SIZE=250 and bounded-concurrency tx fetches, a chunk clears far
+  // more than the old 500/chunk ceiling within its deadline; the deadline is
+  // the real stop. Default high so the cap doesn't artificially fragment runs.
+  const maxCustomers = opts.maxCustomers ?? 50_000;
   const startStatus: SubscriberStatus = opts.startStatus ?? "Active";
   const startPage = Math.max(1, opts.startPage ?? 1);
   const startedAt = Date.now();
@@ -364,13 +411,15 @@ export async function backfillRevenueForRange(
         fresh.push(cust);
       }
 
-      // Fan out transaction-history fetches in parallel within this page.
-      // PAGE_SIZE is small (≤10), so concurrency stays well under any
-      // reasonable rate limit. This is the main throughput improvement —
-      // sequential per-customer fetches were the bottleneck that limited
-      // each cron fire to ~500 customers and missed recurring revenue.
-      const histories = await Promise.all(
-        fresh.map(async (cust) => {
+      // Fan out transaction-history fetches within this page, but bounded to
+      // TX_CONCURRENCY at a time. The page now holds up to 250 customers, so
+      // an unbounded Promise.all would fire 250 history calls at once and trip
+      // Phoenix's 429 limiter. Bounded concurrency keeps throughput high
+      // (15 in flight) while staying under the rate limit.
+      const histories = await mapWithConcurrency(
+        fresh,
+        TX_CONCURRENCY,
+        async (cust) => {
           try {
             const h = await getTransactionHistory(
               opts.tenantId,
@@ -381,7 +430,7 @@ export async function backfillRevenueForRange(
           } catch {
             return { cust, rows: [] as SolvpathTransaction[] };
           }
-        }),
+        },
       );
 
       for (const { cust, rows } of histories) {

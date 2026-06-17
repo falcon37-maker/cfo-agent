@@ -28,17 +28,35 @@ type NavItem = {
   roles?: Role[];
 };
 
-const NAV: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pnl", label: "Stores", icon: LineChart },
-  { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
-  { href: "/finance", label: "Finance", icon: Landmark },
-  { href: "/chargebacks", label: "Chargebacks", icon: ShieldAlert },
-  { href: "/calculator", label: "Calculator", icon: Calculator },
-  { href: "/cogs", label: "Log COGS", icon: CheckSquare },
-  { href: "/ads", label: "Log Ad Spend", icon: Megaphone, roles: ["admin"] },
-  { href: "/revenue", label: "Log Revenue", icon: DollarSign, roles: ["admin"] },
-  { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
+type NavSection = { label: string; items: NavItem[] };
+
+// Grouped like Paysight's sidebar (Platform / Configuration / Support).
+const NAV_SECTIONS: NavSection[] = [
+  {
+    label: "Platform",
+    items: [
+      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/pnl", label: "Stores", icon: LineChart },
+      { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
+      { href: "/finance", label: "Finance", icon: Landmark },
+      { href: "/chargebacks", label: "Chargebacks", icon: ShieldAlert },
+    ],
+  },
+  {
+    label: "Tools",
+    items: [
+      { href: "/calculator", label: "Calculator", icon: Calculator },
+      { href: "/cogs", label: "Log COGS", icon: CheckSquare },
+      { href: "/ads", label: "Log Ad Spend", icon: Megaphone, roles: ["admin"] },
+      { href: "/revenue", label: "Log Revenue", icon: DollarSign, roles: ["admin"] },
+    ],
+  },
+  {
+    label: "Configuration",
+    items: [
+      { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
+    ],
+  },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -64,9 +82,10 @@ export function Sidebar({
   role: Role;
 }) {
   const pathname = usePathname();
-  const visibleNav = NAV.filter(
-    (n) => !n.roles || n.roles.includes(role),
-  );
+  const visibleSections = NAV_SECTIONS.map((s) => ({
+    ...s,
+    items: s.items.filter((n) => !n.roles || n.roles.includes(role)),
+  })).filter((s) => s.items.length > 0);
 
   return (
     <aside className="sidebar">
@@ -86,22 +105,26 @@ export function Sidebar({
         <kbd>⌘K</kbd>
       </button>
 
-      <div className="sidebar-section-label">Workspace</div>
       <nav className="sidebar-nav">
-        {visibleNav.map(({ href, label, icon: Icon, badge }) => {
-          const active = isActive(pathname, href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`nav-item ${active ? "active" : ""}`}
-            >
-              <Icon size={16} strokeWidth={1.75} />
-              <span>{label}</span>
-              {badge ? <span className="nav-badge">{badge}</span> : null}
-            </Link>
-          );
-        })}
+        {visibleSections.map((section) => (
+          <div key={section.label} className="sidebar-group">
+            <div className="sidebar-section-label">{section.label}</div>
+            {section.items.map(({ href, label, icon: Icon, badge }) => {
+              const active = isActive(pathname, href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`nav-item ${active ? "active" : ""}`}
+                >
+                  <Icon size={16} strokeWidth={1.75} />
+                  <span>{label}</span>
+                  {badge ? <span className="nav-badge">{badge}</span> : null}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="sidebar-footer">

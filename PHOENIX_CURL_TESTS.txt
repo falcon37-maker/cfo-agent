@@ -1,0 +1,43 @@
+═══════════════════════════════════════════════════════════════
+ PHOENIX (Solvpath) API — curl test commands
+ Base: https://pffe.phoenixtechnologies.io/phxcrm
+
+ ⚠️ request-id har call pe UNIQUE hona chahiye (warna 400 "already exists")
+ 🔑 Transactions ke liye CustomerId zaroori — /customers se nikaalo
+
+ Token values .env mein hain (SOLVPATH_PARTNER_ID / SOLVPATH_PARTNER_TOKEN /
+ SOLVPATH_BEARER_TOKEN). Yahan repo file mein literally nahi rakhe.
+ Niche <PARTNER_ID> / <PARTNER_TOKEN> / <BEARER_TOKEN> ko apni values se badlo.
+═══════════════════════════════════════════════════════════════
+
+# ─── 1) Customers list (yahan se CustomerId milte hain) — WORKS ───
+curl -s "https://pffe.phoenixtechnologies.io/phxcrm/customers?Page=1&Limit=5" \
+  -H "partnerId: <PARTNER_ID>" \
+  -H "partnerToken: <PARTNER_TOKEN>" \
+  -H "Authorization: Bearer <BEARER_TOKEN>" \
+  -H "request-id: list-001" \
+  -H "Accept: application/json"
+
+# ─── 2) TRANSACTIONS for a customer (endpoint = /transaction-history) — WORKS ───
+curl -s "https://pffe.phoenixtechnologies.io/phxcrm/transaction-history?CustomerId=4872599" \
+  -H "partnerId: <PARTNER_ID>" \
+  -H "partnerToken: <PARTNER_TOKEN>" \
+  -H "Authorization: Bearer <BEARER_TOKEN>" \
+  -H "request-id: txn-001" \
+  -H "Accept: application/json"
+
+# ─── 3) TRANSACTIONS filtered from a date (StartDateTime) ───
+curl -s "https://pffe.phoenixtechnologies.io/phxcrm/transaction-history?CustomerId=4872599&StartDateTime=2026-06-14" \
+  -H "partnerId: <PARTNER_ID>" \
+  -H "partnerToken: <PARTNER_TOKEN>" \
+  -H "Authorization: Bearer <BEARER_TOKEN>" \
+  -H "request-id: txn-002" \
+  -H "Accept: application/json"
+
+═══════════════════════════════════════════════════════════════
+ 401 (NOT authorized for us): /transactions, /orders,
+   /customers/{id}/transactions, /reporting/transactions
+ => koi "ek din ke saare transactions" bulk endpoint nahi.
+    Sirf per-customer /transaction-history milta hai — isliye
+    ~5700 customers walk karne padte hain (30-40 min).
+═══════════════════════════════════════════════════════════════

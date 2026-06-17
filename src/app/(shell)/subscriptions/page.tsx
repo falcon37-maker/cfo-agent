@@ -3,13 +3,7 @@
 // + transaction-type Order Mix.
 
 import Link from "next/link";
-import {
-  Users,
-  CreditCard,
-  Target,
-  Activity,
-  AlertCircle,
-} from "lucide-react";
+import { Users, CreditCard, Target, Activity } from "lucide-react";
 import {
   loadLatestPortfolioSnapshot,
   loadPhxDailyRows,
@@ -32,6 +26,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Subscriptions — CFO Agent" };
 
 const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
+// Subscription processing fee ~16% of billed revenue (client spec, Jun 2026).
+const SUBS_FEE_RATE = 0.16;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const RANGES: Array<{ id: string; days: number }> = [
   { id: "7d", days: 7 },
@@ -94,6 +90,9 @@ type LedgerRow = {
   date: string;
   orders: number;
   revenue: number;
+  new_rev: number; // Initial enrollments (new subscribers' first charge)
+  new_count: number; // Count of initial enrollments (Subscription Build)
+  rebill_rev: number; // Recurring + Salvage (re-charges of existing subs)
   ad_spend: number;
   cogs: number;
   fees: number;
@@ -110,6 +109,9 @@ function buildLedger(
   type Acc = {
     orders: number;
     revenue: number;
+    new_rev: number;
+    new_count: number;
+    rebill_rev: number;
     ad_spend: number;
     cogs: number;
     fees: number;
@@ -118,33 +120,58 @@ function buildLedger(
   const get = (d: string) => {
     let m = byDate.get(d);
     if (!m) {
-      m = { orders: 0, revenue: 0, ad_spend: 0, cogs: 0, fees: 0 };
+      m = {
+        orders: 0,
+        revenue: 0,
+        new_rev: 0,
+        new_count: 0,
+        rebill_rev: 0,
+        ad_spend: 0,
+        cogs: 0,
+        fees: 0,
+      };
       byDate.set(d, m);
     }
     return m;
   };
-  // Phoenix per-day subs (fallback source).
-  const phxByDate = new Map<string, { revenue: number; orders: number }>();
+  // Phoenix per-day subs, split into NEW (Initial enrollments) and REBILL
+  // (Recurring + Salvage re-charges of existing subscribers).
+  const phxByDate = new Map<
+    string,
+    {
+      revenue: number;
+      newRev: number;
+      newCount: number;
+      rebillRev: number;
+      orders: number;
+    }
+  >();
   for (const r of phxRows) {
     if (!r.range_from || r.range_from !== r.range_to) continue;
     const d = r.range_from;
-    const rev =
-      num(r.revenue_initial) +
-      num(r.revenue_recurring) +
-      num(r.revenue_salvage);
+    const newRev = num(r.revenue_initial);
+    const rebillRev = num(r.revenue_recurring) + num(r.revenue_salvage);
     const j = (r.raw_json as Record<string, unknown> | null) ?? {};
+    const newCount = Number(j.initialCount ?? 0);
     const ord =
-      Number(j.initialCount ?? 0) +
+      newCount +
       Number(j.recurringCount ?? 0) +
       Number(j.salvageCount ?? 0);
-    const cur = phxByDate.get(d) ?? { revenue: 0, orders: 0 };
-    cur.revenue += rev;
+    const cur =
+      phxByDate.get(d) ??
+      { revenue: 0, newRev: 0, newCount: 0, rebillRev: 0, orders: 0 };
+    cur.revenue += newRev + rebillRev;
+    cur.newRev += newRev;
+    cur.newCount += newCount;
+    cur.rebillRev += rebillRev;
     cur.orders += ord;
     phxByDate.set(d, cur);
   }
-  // Subscription revenue per day: Paysight preferred, Phoenix fallback (same
-  // migration logic as the P&L ledger — subscriptions moved Phoenix→Paysight
-  // in Jun 2026, so use Paysight wherever it has data).
+  // Subscription revenue per day = BILLED only: Phoenix billed (Initial +
+  // Recurring + Salvage) + Paysight rebills (payment_number >= 1; the loader
+  // filters). Additive — each rebill is charged on exactly one platform, so
+  // no double-count. Newly-acquired cycle-0 checkout charges are store
+  // revenue, not Subs Rev (client spec Jun 2026).
   const allDates = new Set<string>([
     ...phxByDate.keys(),
     ...paysightByDate.keys(),
@@ -152,24 +179,36 @@ function buildLedger(
   for (const d of allDates) {
     const pay = paysightByDate.get(d);
     const phx = phxByDate.get(d);
-    const usePay = !!pay && pay.subs > 0;
     const m = get(d);
-    m.revenue += usePay ? pay!.subs : phx?.revenue ?? 0;
-    m.orders += usePay ? pay!.subOrders : phx?.orders ?? 0;
+    m.revenue += (phx?.revenue ?? 0) + (pay?.subs ?? 0);
+    // NEW = Phoenix Initial enrollments. REBILL = Phoenix Recurring + Salvage,
+    // plus Paysight rebills (payment_number >= 1 — the loader already filters,
+    // so pay.subs is rebill-only). Currently Paysight rebills are $0 (cycles
+    // start ~mid-Jul), so today rebill comes entirely from Phoenix.
+    m.new_rev += phx?.newRev ?? 0;
+    m.new_count += phx?.newCount ?? 0;
+    m.rebill_rev += (phx?.rebillRev ?? 0) + (pay?.subs ?? 0);
+    m.orders += (phx?.orders ?? 0) + (pay?.subOrders ?? 0);
   }
+  // COGS still comes from daily_pnl (subscription fulfillment cost). Ad spend
+  // and Shopify processing fees are NOT a subscription concern — subscriptions
+  // are billed by the CRM (Phoenix/Paysight) at a ~16% processing fee, applied
+  // below. (This is what removes the misleading "$22k ad spend" the client
+  // flagged: ad spend belongs to the Stores page, not here.)
   for (const r of pnlRows) {
     const m = get(r.date);
-    m.ad_spend += num(r.ad_spend);
     m.cogs += num(r.cogs);
-    m.fees += num(r.fees);
   }
   const out: LedgerRow[] = [];
   for (const [date, m] of [...byDate.entries()].sort((a, b) =>
     b[0].localeCompare(a[0]),
   )) {
-    const gross_profit = m.revenue - m.cogs - m.fees;
-    const net_profit = gross_profit - m.ad_spend;
-    const roas = m.ad_spend > 0 ? m.revenue / m.ad_spend : 0;
+    // Subscription processing fee ~16% of billed revenue (client spec).
+    m.fees = m.revenue * SUBS_FEE_RATE;
+    m.ad_spend = 0;
+    const gross_profit = m.revenue - m.cogs;
+    const net_profit = gross_profit - m.fees;
+    const roas = 0;
     out.push({ date, ...m, gross_profit, net_profit, roas });
   }
   return out;
@@ -178,6 +217,9 @@ function buildLedger(
 function sumLedger(rows: LedgerRow[]) {
   let orders = 0,
     revenue = 0,
+    new_rev = 0,
+    new_count = 0,
+    rebill_rev = 0,
     ad_spend = 0,
     cogs = 0,
     fees = 0,
@@ -186,6 +228,9 @@ function sumLedger(rows: LedgerRow[]) {
   for (const r of rows) {
     orders += r.orders;
     revenue += r.revenue;
+    new_rev += r.new_rev;
+    new_count += r.new_count;
+    rebill_rev += r.rebill_rev;
     ad_spend += r.ad_spend;
     cogs += r.cogs;
     fees += r.fees;
@@ -193,7 +238,41 @@ function sumLedger(rows: LedgerRow[]) {
     net_profit += r.net_profit;
   }
   const roas = ad_spend > 0 ? revenue / ad_spend : 0;
-  return { orders, revenue, ad_spend, cogs, fees, gross_profit, net_profit, roas };
+  return {
+    orders,
+    revenue,
+    new_rev,
+    new_count,
+    rebill_rev,
+    ad_spend,
+    cogs,
+    fees,
+    gross_profit,
+    net_profit,
+    roas,
+  };
+}
+
+/** Aggregate per-type subscription counts across the window from the per-store
+ *  PHX snapshots (raw_json carries initialCount/recurringCount/salvageCount/
+ *  directCount/upsellCount). The PORTFOLIO snapshot no longer carries these,
+ *  so we sum them from the window's daily rows instead. */
+function aggregateOrderMix(phxRows: PhxSnapshot[]) {
+  let direct = 0,
+    initial = 0,
+    recurring = 0,
+    salvage = 0,
+    upsell = 0;
+  for (const r of phxRows) {
+    if (!r.range_from || r.range_from !== r.range_to) continue;
+    const j = (r.raw_json as Record<string, unknown> | null) ?? {};
+    direct += Number(j.directCount ?? 0);
+    initial += Number(j.initialCount ?? 0);
+    recurring += Number(j.recurringCount ?? 0);
+    salvage += Number(j.salvageCount ?? 0);
+    upsell += Number(j.upsellCount ?? 0);
+  }
+  return { direct, initial, recurring, salvage, upsell };
 }
 
 export default async function SubscriptionsOverviewPage({
@@ -324,14 +403,17 @@ export default async function SubscriptionsOverviewPage({
           </div>
           <SyncDataButton
             sources={["paysight", "phoenix"]}
-            phoenixRevenue={false}
-            description="Re-pull subscription data from Paysight & Phoenix into the database."
+            description="Re-pull billed subscription revenue from Paysight & Phoenix into the database."
           />
         </div>
       </div>
 
       {/* ── Lifetime KPI strip (from latest snapshot) ── */}
-      {snapshot ? <KpiStrip snapshot={snapshot} /> : <NoSnapshotBanner />}
+      {snapshot ? (
+        <KpiStrip snapshot={snapshot} totals={totals} />
+      ) : (
+        <NoSnapshotBanner />
+      )}
 
       {/* ── Daily ledger ── */}
       <div className="card table-card" style={{ marginTop: 16 }}>
@@ -339,8 +421,14 @@ export default async function SubscriptionsOverviewPage({
           <div>
             <div className="card-title">Daily ledger · subscriptions</div>
             <div className="card-sub">
-              Per-day Initial + Recurring + Salvage revenue, plus the
-              Shopify-side ad spend / COGS / fees for the same stores.
+              Per-day billed subscriptions.{" "}
+              <span style={{ color: "var(--accent)" }}>Subscription Count</span>{" "}
+              (number of billed charges) +{" "}
+              <span style={{ color: "var(--positive)" }}>
+                Subscription Build
+              </span>{" "}
+              (total billed revenue: new + recurring + salvage), across PHX
+              &amp; Paysight.
             </div>
           </div>
         </div>
@@ -349,23 +437,24 @@ export default async function SubscriptionsOverviewPage({
             <thead>
               <tr>
                 <th>Date</th>
-                <th className="num">Orders</th>
-                <th className="num">Revenue</th>
-                <th className="num">Ad Spend</th>
+                <th className="num">Subscription Count</th>
+                <th className="num">Subscription Build</th>
                 <th className="num">COGS</th>
                 <th className="num">Fees</th>
                 <th className="num">Gross Profit</th>
                 <th className="num">Net Profit</th>
-                <th className="num">ROAS</th>
               </tr>
             </thead>
             <tbody>
               {ledger.map((r) => (
                 <tr key={r.date}>
                   <td>{fmtDate(r.date)}</td>
-                  <td className="num muted">{fmtInt(r.orders)}</td>
-                  <td className="num">{fmtMoney(r.revenue)}</td>
-                  <td className="num muted">{fmtMoney(r.ad_spend)}</td>
+                  <td className="num" style={{ color: "var(--accent)" }}>
+                    {fmtInt(r.orders)}
+                  </td>
+                  <td className="num" style={{ color: "var(--positive)" }}>
+                    {fmtMoney(r.revenue)}
+                  </td>
                   <td className="num muted">{fmtMoney(r.cogs)}</td>
                   <td className="num muted">{fmtMoney(r.fees)}</td>
                   <td className="num">{fmtMoney(r.gross_profit)}</td>
@@ -374,11 +463,6 @@ export default async function SubscriptionsOverviewPage({
                   >
                     <span className="profit-pill">{fmtMoney(r.net_profit)}</span>
                   </td>
-                  <td
-                    className={`num roas ${r.ad_spend > 0 ? (r.roas >= 2 ? "pos" : "neg") : ""}`}
-                  >
-                    {r.ad_spend > 0 ? `${r.roas.toFixed(2)}x` : "—"}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -386,19 +470,17 @@ export default async function SubscriptionsOverviewPage({
               <tfoot>
                 <tr className="tfoot-row">
                   <td>Total</td>
-                  <td className="num">{fmtInt(totals.orders)}</td>
-                  <td className="num">{fmtMoney(totals.revenue)}</td>
-                  <td className="num">{fmtMoney(totals.ad_spend)}</td>
+                  <td className="num" style={{ color: "var(--accent)" }}>
+                    {fmtInt(totals.orders)}
+                  </td>
+                  <td className="num" style={{ color: "var(--positive)" }}>
+                    {fmtMoney(totals.revenue)}
+                  </td>
                   <td className="num">{fmtMoney(totals.cogs)}</td>
                   <td className="num">{fmtMoney(totals.fees)}</td>
                   <td className="num">{fmtMoney(totals.gross_profit)}</td>
                   <td className={`num profit ${totals.net_profit >= 0 ? "pos" : "neg"}`}>
                     <span className="profit-pill">{fmtMoney(totals.net_profit)}</span>
-                  </td>
-                  <td
-                    className={`num roas ${totals.ad_spend > 0 ? (totals.roas >= 2 ? "pos" : "neg") : ""}`}
-                  >
-                    {totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
                   </td>
                 </tr>
               </tfoot>
@@ -420,7 +502,7 @@ export default async function SubscriptionsOverviewPage({
       ) : null}
 
       {/* ── Order mix ── */}
-      {snapshot ? <OrderMix snapshot={snapshot} /> : null}
+      <OrderMix mix={aggregateOrderMix(phxDays)} />
     </>
   );
 }
@@ -501,7 +583,19 @@ function PaysightCard({
   );
 }
 
-function KpiStrip({ snapshot }: { snapshot: PhxSnapshot }) {
+function KpiStrip({
+  snapshot,
+  totals,
+}: {
+  snapshot: PhxSnapshot;
+  totals: ReturnType<typeof sumLedger>;
+}) {
+  // Subscription financials for the selected window (billed revenue only).
+  const grossRevenue = totals.revenue;
+  const netMargin =
+    grossRevenue > 0 ? (totals.net_profit / grossRevenue) * 100 : 0;
+  // Average gross per billed order in the window.
+  const avgGross = totals.orders > 0 ? grossRevenue / totals.orders : 0;
   return (
     <section className="kpi-row kpi-5">
       <KpiCard
@@ -513,42 +607,37 @@ function KpiStrip({ snapshot }: { snapshot: PhxSnapshot }) {
         icon={<Users size={14} strokeWidth={1.75} />}
       />
       <KpiCard
-        label="Subs to bill"
-        value={fmtInt(snapshot.subscriptions_to_bill)}
+        label="Billed Subscriptions"
+        value={fmtInt(totals.orders)}
         delta={null}
-        deltaLabel="next billing window"
+        deltaLabel="subscription charges · window"
         spark={[]}
         icon={<CreditCard size={14} strokeWidth={1.75} />}
       />
       <KpiCard
-        label="Target CAC"
-        value={
-          snapshot.target_cac != null ? fmtMoney(snapshot.target_cac) : "—"
-        }
+        label="Gross Revenue"
+        value={fmtMoney(grossRevenue)}
         delta={null}
-        deltaLabel="from latest snapshot"
+        deltaLabel="billed subscriptions · window"
         spark={[]}
-        sparkColor="var(--muted-strong)"
-        invert
+        icon={<CreditCard size={14} strokeWidth={1.75} />}
+      />
+      <KpiCard
+        label="Net Margin"
+        value={`${netMargin.toFixed(1)}%`}
+        delta={null}
+        deltaLabel="after ~16% fees · window"
+        spark={[]}
+        sparkColor="var(--positive)"
         icon={<Target size={14} strokeWidth={1.75} />}
       />
       <KpiCard
-        label="Transactions"
-        value={fmtInt(snapshot.total_transactions_mtd)}
+        label="Average Gross"
+        value={fmtMoney(avgGross)}
         delta={null}
-        deltaLabel="MTD · latest snapshot"
+        deltaLabel="per billed subscription · window"
         spark={[]}
         icon={<Activity size={14} strokeWidth={1.75} />}
-      />
-      <KpiCard
-        label="Refund total"
-        value={fmtMoney(snapshot.refund_total)}
-        delta={null}
-        deltaLabel="MTD · latest snapshot"
-        spark={[]}
-        sparkColor="var(--negative)"
-        invert
-        icon={<AlertCircle size={14} strokeWidth={1.75} />}
       />
     </section>
   );
@@ -570,33 +659,17 @@ function NoSnapshotBanner() {
   );
 }
 
-function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
+function OrderMix({
+  mix,
+}: {
+  mix: ReturnType<typeof aggregateOrderMix>;
+}) {
   const rows = [
-    {
-      label: "Direct Sale",
-      count: snapshot.direct_sale_count,
-      pct: snapshot.direct_sale_success_pct,
-    },
-    {
-      label: "Initial Subscription",
-      count: snapshot.initial_subscription_count,
-      pct: snapshot.initial_subscription_success_pct,
-    },
-    {
-      label: "Recurring Subscription",
-      count: snapshot.recurring_subscription_count,
-      pct: snapshot.recurring_subscription_success_pct,
-    },
-    {
-      label: "Subscription Salvage",
-      count: snapshot.subscription_salvage_count,
-      pct: snapshot.subscription_salvage_success_pct,
-    },
-    {
-      label: "Upsell",
-      count: snapshot.upsell_count,
-      pct: snapshot.upsell_success_pct,
-    },
+    { label: "Direct Sale", count: mix.direct },
+    { label: "Initial Subscription", count: mix.initial },
+    { label: "Recurring Subscription", count: mix.recurring },
+    { label: "Subscription Salvage", count: mix.salvage },
+    { label: "Upsell", count: mix.upsell },
   ];
   const total = rows.reduce((s, r) => s + (r.count ?? 0), 0);
 
@@ -606,7 +679,7 @@ function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
         <div>
           <div className="card-title">Order mix</div>
           <div className="card-sub">
-            Counts and approval rates from latest PHX snapshot
+            Billed subscription counts by type · window
           </div>
         </div>
       </div>
@@ -617,7 +690,6 @@ function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
               <th>Type</th>
               <th className="num">Count</th>
               <th className="num">% of mix</th>
-              <th className="num">Approval %</th>
             </tr>
           </thead>
           <tbody>
@@ -630,9 +702,6 @@ function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
                   <td className="num muted">
                     {share > 0 ? fmtPct(share) : "—"}
                   </td>
-                  <td className="num muted">
-                    {r.pct != null ? fmtPct(r.pct) : "—"}
-                  </td>
                 </tr>
               );
             })}
@@ -642,7 +711,6 @@ function OrderMix({ snapshot }: { snapshot: PhxSnapshot }) {
               <td>Total</td>
               <td className="num">{fmtInt(total)}</td>
               <td className="num">100.0%</td>
-              <td className="num">—</td>
             </tr>
           </tfoot>
         </table>

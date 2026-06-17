@@ -54,8 +54,8 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
         <div>
           <div className="card-title">Daily P&amp;L · blended</div>
           <div className="card-sub">
-            Shopify front-end (direct + initial) + PHX recurring / salvage,
-            amortized per day from PHX snapshots
+            Shopify store revenue + subscription billing per day —
+            Total = Shopify Revenue + Subscription Revenue (+ manual)
           </div>
         </div>
         {rangeControl ? (
@@ -67,12 +67,12 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
             <thead>
               <tr>
                 <th>Date</th>
-                <th className="num">Orders</th>
-                <th className="num">Subs Billed</th>
-                <th className="num">Frontend Rev</th>
-                <th className="num">Subs Rev</th>
+                <th className="num">Shopify Orders</th>
+                <th className="num">Subscription Count</th>
+                <th className="num">Shopify Revenue</th>
+                <th className="num">Subscription Build</th>
                 {showManual ? <th className="num">Manual Rev</th> : null}
-                <th className="num">Total Rev</th>
+                <th className="num">Total</th>
                 <th className="num">COGS</th>
                 <th className="num">Ad Spend</th>
                 <th className="num">ROAS</th>

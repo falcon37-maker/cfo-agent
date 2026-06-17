@@ -115,9 +115,7 @@ export default async function PnlPage({
         <div>
           <h2 className="section-title">Stores</h2>
           <div className="section-sub">
-            Per-store P&amp;L. NOVA / NURA / KOVA include their PHX
-            subscription revenue (Initial + Recurring + Salvage) in the
-            <span className="mono"> Subs Rev</span> column.{" "}
+            Per-store Shopify drop-shipping P&amp;L. Processing fees ~3.9%.{" "}
             {selected.length === 0
               ? "All stores"
               : selected.length === 1
@@ -180,7 +178,11 @@ export default async function PnlPage({
               );
             })}
           </div>
-          <SyncDataButton />
+          <SyncDataButton
+            sources={["shopify"]}
+            storeIds={stores.map((s) => s.id)}
+            description="Re-pull drop-ship store (Shopify) orders & revenue for the chosen date into the database."
+          />
           <Link href={exportHref} className="primary-btn">
             <Download size={13} strokeWidth={2} />
             Export CSV
