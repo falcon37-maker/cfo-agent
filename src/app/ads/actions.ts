@@ -34,15 +34,31 @@ export async function submitAdSpendAction(formData: FormData) {
   const now = new Date().toISOString();
   const roundedAmount = Math.round(amount * 100) / 100;
 
-  // 1. Upsert the ad-spend row. Keyed on platform='facebook' to stay
-  // consistent with the CSV-imported historical data.
+  // 1. ADD this entry to the (store, date, facebook) row instead of replacing
+  // it. A store can run 2–3 ad accounts spending on the same day; each manual
+  // entry must accumulate. Previously this upserted on
+  // (store_id,date,platform) with a fixed platform="facebook", so a second
+  // entry the same day OVERWROTE the first (client reported KOVA $2,295.17 +
+  // $918.26 only kept the last one). We read the existing spend and add.
+  const { data: existingAd, error: existErr } = await sb
+    .from("daily_ad_spend")
+    .select("spend")
+    .eq("tenant_id", tenant.id)
+    .eq("store_id", storeId)
+    .eq("date", date)
+    .eq("platform", "facebook")
+    .maybeSingle();
+  if (existErr) redirect("/ads?err=db");
+  const accumulated =
+    Math.round((Number(existingAd?.spend ?? 0) + roundedAmount) * 100) / 100;
+
   const { error: adErr } = await sb.from("daily_ad_spend").upsert(
     {
       tenant_id: tenant.id,
       store_id: storeId,
       date,
       platform: "facebook",
-      spend: roundedAmount,
+      spend: accumulated,
       currency: "USD",
       synced_at: now,
     },
