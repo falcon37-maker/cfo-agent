@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { hasStoreCreds } from "@/lib/shopify/stores";
 import { requireTenant } from "@/lib/tenant";
 import { describeIntegrationStatus } from "@/lib/integrations";
+import { checkPhoenixPortalHealth } from "@/lib/phoenix-portal/client";
 import {
   SecretField,
   SaveButton,
@@ -80,11 +81,15 @@ export default async function IntegrationsSettingsPage({
 }) {
   const params = await searchParams;
   const tenant = await requireTenant();
-  const [creds, shopifyStores, integrationStatus] = await Promise.all([
-    loadCredentials(tenant.id),
-    loadShopifyStores(tenant.id),
-    describeIntegrationStatus(tenant.id),
-  ]);
+  const [creds, shopifyStores, integrationStatus, phoenixHealth] =
+    await Promise.all([
+      loadCredentials(tenant.id),
+      loadShopifyStores(tenant.id),
+      describeIntegrationStatus(tenant.id),
+      // Live check: actually exchange the Phoenix portal refresh token so the
+      // badge reflects real connectivity (expired/error), not just "saved".
+      checkPhoenixPortalHealth(tenant.id),
+    ]);
   // Pre-resolve credsSet for each store so the JSX can render synchronously.
   const storeCredsSet = new Map<string, boolean>();
   await Promise.all(
@@ -261,7 +266,72 @@ export default async function IntegrationsSettingsPage({
             className="card"
             style={{ padding: 16, display: "grid", gap: 10 }}
           >
-            <div className="card-title">Solvpath / PHX</div>
+            <div
+              className="card-title"
+              style={{ display: "flex", alignItems: "center", gap: 8 }}
+            >
+              Solvpath / PHX
+              {(() => {
+                const pill = (
+                  color: string,
+                  text: string,
+                  withIcon = false,
+                ) => (
+                  <span
+                    title={
+                      phoenixHealth.status === "expired" ||
+                      phoenixHealth.status === "error"
+                        ? phoenixHealth.reason
+                        : undefined
+                    }
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color,
+                      background: `color-mix(in srgb, ${color} 14%, transparent)`,
+                      border: `1px solid color-mix(in srgb, ${color} 35%, transparent)`,
+                      borderRadius: 999,
+                      padding: "2px 8px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    {withIcon ? <Zap size={11} strokeWidth={2.5} /> : null}
+                    {text}
+                  </span>
+                );
+                switch (phoenixHealth.status) {
+                  case "connected":
+                    return pill(
+                      "var(--positive)",
+                      phoenixHealth.expiresInDays != null
+                        ? `Connected · expires in ${phoenixHealth.expiresInDays}d`
+                        : "Connected",
+                      true,
+                    );
+                  case "expired":
+                    return pill("var(--negative)", "Expired · reconnect");
+                  case "error":
+                    return pill("var(--negative)", "Connection error");
+                  default:
+                    return (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "var(--muted)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 999,
+                          padding: "2px 8px",
+                        }}
+                      >
+                        Not connected
+                      </span>
+                    );
+                }
+              })()}
+            </div>
             <div className="card-sub">
               {integrationStatus.solvpath.configured
                 ? `Saved · fields: ${integrationStatus.solvpath.fields.join(", ")}`
@@ -287,6 +357,20 @@ export default async function IntegrationsSettingsPage({
               label="Bearer token"
               hasSaved={integrationStatus.solvpath.fields.includes("bearerToken")}
             />
+            <SecretField
+              name="portal_refresh_token"
+              label="Portal refresh token (for billing sync)"
+              hasSaved={integrationStatus.phoenix_portal?.configured ?? false}
+            />
+            <div
+              className="section-sub"
+              style={{ fontSize: 11, color: "var(--muted)", marginTop: -4 }}
+            >
+              Powers the fast capture-only billing sync. Paste{" "}
+              <span className="mono">localStorage.refresh_token</span> from the
+              logged-in Phoenix portal. Auto-renews; re-paste if it expires
+              (~7 days).
+            </div>
             <label className="field">
               <span className="field-label">Base URL (optional)</span>
               <div className="field-input">

@@ -13,7 +13,8 @@ import {
   loadPaysightSummary,
   loadPaysightSubsByDate,
 } from "@/lib/paysight/queries";
-import { loadStores } from "@/lib/pnl/queries";
+import { loadStores, loadBlendedDashboardData } from "@/lib/pnl/queries";
+import { BlendedPnlTable } from "@/components/dashboard/BlendedPnlTable";
 import { requireTenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
@@ -305,13 +306,16 @@ export default async function SubscriptionsOverviewPage({
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
-  const [snapshot, phxDays, pnlRows, paysight, paysightSubsByDate] =
+  const [snapshot, phxDays, pnlRows, paysight, paysightSubsByDate, blended] =
     await Promise.all([
       loadLatestPortfolioSnapshot(tenant.id),
       loadPhxDailyRows(from, to, selectedPhx, tenant.id),
       loadDailyPnl(from, to, selectedPhx, tenant.id),
       loadPaysightSummary(tenant.id, from, to),
       loadPaysightSubsByDate(tenant.id, from, to, selectedPhx),
+      // Full blended P&L (same as main dashboard) but scoped to the
+      // subscription stores only — client wants ad spend / ROAS / totals here.
+      loadBlendedDashboardData(tenant.id, { from, to }, { storeScope: "subscription" }),
     ]);
 
   const ledger = buildLedger(phxDays, pnlRows, paysightSubsByDate);
@@ -415,86 +419,10 @@ export default async function SubscriptionsOverviewPage({
         <NoSnapshotBanner />
       )}
 
-      {/* ── Daily ledger ── */}
-      <div className="card table-card" style={{ marginTop: 16 }}>
-        <div className="card-head">
-          <div>
-            <div className="card-title">Daily ledger · subscriptions</div>
-            <div className="card-sub">
-              Per-day billed subscriptions from the gateways.{" "}
-              <span style={{ color: "var(--accent)" }}>Subs Billed</span>{" "}
-              (payments captured) +{" "}
-              <span style={{ color: "var(--positive)" }}>
-                Subscription Billed
-              </span>{" "}
-              (amount billed: new + recurring + salvage), straight from PHX
-              &amp; Paysight.
-            </div>
-          </div>
-        </div>
-        <div className="table-wrap" style={{ maxHeight: 560 }}>
-          <table className="pnl-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th className="num">Subs Billed</th>
-                <th className="num">Subscription Billed</th>
-                <th className="num">COGS</th>
-                <th className="num">Fees</th>
-                <th className="num">Gross Profit</th>
-                <th className="num">Net Profit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ledger.map((r) => (
-                <tr key={r.date}>
-                  <td>{fmtDate(r.date)}</td>
-                  <td className="num" style={{ color: "var(--accent)" }}>
-                    {fmtInt(r.orders)}
-                  </td>
-                  <td className="num" style={{ color: "var(--positive)" }}>
-                    {fmtMoney(r.revenue)}
-                  </td>
-                  <td className="num muted">{fmtMoney(r.cogs)}</td>
-                  <td className="num muted">{fmtMoney(r.fees)}</td>
-                  <td className="num">{fmtMoney(r.gross_profit)}</td>
-                  <td
-                    className={`num profit ${r.net_profit >= 0 ? "pos" : "neg"}`}
-                  >
-                    <span className="profit-pill">{fmtMoney(r.net_profit)}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {ledger.length > 0 ? (
-              <tfoot>
-                <tr className="tfoot-row">
-                  <td>Total</td>
-                  <td className="num" style={{ color: "var(--accent)" }}>
-                    {fmtInt(totals.orders)}
-                  </td>
-                  <td className="num" style={{ color: "var(--positive)" }}>
-                    {fmtMoney(totals.revenue)}
-                  </td>
-                  <td className="num">{fmtMoney(totals.cogs)}</td>
-                  <td className="num">{fmtMoney(totals.fees)}</td>
-                  <td className="num">{fmtMoney(totals.gross_profit)}</td>
-                  <td className={`num profit ${totals.net_profit >= 0 ? "pos" : "neg"}`}>
-                    <span className="profit-pill">{fmtMoney(totals.net_profit)}</span>
-                  </td>
-                </tr>
-              </tfoot>
-            ) : null}
-          </table>
-          {ledger.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>
-              No subscription data in this range. Check that Solvpath has
-              synced — the latest scrape was{" "}
-              {snapshot?.scraped_at?.slice(0, 10) ?? "(never)"}.
-            </div>
-          ) : null}
-        </div>
-      </div>
+      {/* ── Daily ledger — same blended table as the main dashboard, but
+            scoped to the subscription stores only, with a 16.3% subscription
+            processor Fees column (client spec Jun 2026). ── */}
+      <BlendedPnlTable rows={blended.daily} showFees feeRate={0.163} />
 
       {/* ── Paysight (parallel subscription CRM) ── */}
       {paysight.hasData ? (

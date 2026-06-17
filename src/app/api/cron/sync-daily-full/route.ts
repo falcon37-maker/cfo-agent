@@ -25,10 +25,12 @@ import { hasStoreCreds } from "@/lib/shopify/stores";
 import { syncPaysightDay } from "@/lib/paysight/sync";
 import { getPaysightCreds, getSolvpathCreds } from "@/lib/integrations";
 import {
-  backfillRevenueForRange,
   SUBSCRIBER_STATUSES,
+  backfillRevenueForRange,
 } from "@/lib/solvpath/sync";
 import { listCustomers } from "@/lib/solvpath/client";
+import { syncPhoenixPortalDay } from "@/lib/phoenix-portal/sync";
+import { hasPhoenixPortalCreds } from "@/lib/phoenix-portal/client";
 import { listActiveTenants } from "@/lib/tenant";
 
 export const runtime = "nodejs";
@@ -38,7 +40,6 @@ export const maxDuration = 800;
 // Reserve the bulk of the wall budget for the heavy Phoenix revenue walk,
 // but stop early enough to always return a response.
 const TOTAL_BUDGET_MS = 760_000; // 760s; Vercel cap is 800s
-const PHX_CHUNK_DEADLINE_MS = 55_000;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -171,7 +172,11 @@ async function handle(req: NextRequest) {
       paysight.push({ tenant: tenant.display_name, subs, tx, failed });
     }
 
-    // ── 3. Phoenix: counts (fast) + revenue walk (heavy, time-boxed) ──
+    // ── 3. Phoenix: subscriber counts (fast) + billing via bulk portal API ──
+    // The bulk get_details API returns a whole day in one call, so we just
+    // loop the window day-by-day (capture-only — settled payments). No more
+    // ~5700-customer walk. Token is renewed server-side from the rotating
+    // refresh_token (integrations.provider='phoenix_portal').
     const sCreds = await getSolvpathCreds(tenant.id);
     if (sCreds) {
       try {
@@ -184,48 +189,71 @@ async function handle(req: NextRequest) {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
 
-      // Revenue walk — chunked. Resumes across daily fires via the cursor
-      // that backfillRevenueForRange persists internally (seenCustomers).
-      let startStatus:
-        | "Active"
-        | "Canceled"
-        | "Never Enrolled"
-        | undefined;
+    if (await hasPhoenixPortalCreds(tenant.id)) {
+      // Preferred: bulk portal API (fast, capture-only).
+      let billedCount = 0;
+      let billedRevenue = 0;
+      let failed = 0;
+      let lastErr: string | null = null;
+      for (const date of daysInRangeUtc(from, to)) {
+        if (Date.now() - started >= TOTAL_BUDGET_MS) {
+          phoenixTimedOut = true;
+          break;
+        }
+        try {
+          const r = await syncPhoenixPortalDay(tenant.id, date);
+          billedCount += r.totalBilledCount;
+          billedRevenue += r.totalBilledRevenue;
+        } catch (err) {
+          failed++;
+          lastErr = err instanceof Error ? err.message : String(err);
+        }
+      }
+      phoenix.push({
+        tenant: tenant.display_name,
+        billing: "portal_bulk_capture_only",
+        billedCount,
+        billedRevenue: Math.round(billedRevenue * 100) / 100,
+        failed,
+        ...(lastErr ? { lastError: lastErr } : {}),
+        ...(phoenixTimedOut ? { note: "time-boxed; resumes next fire" } : {}),
+      });
+    } else if (sCreds) {
+      // Fallback: no portal token — legacy partner-API per-customer walk,
+      // chunked + time-boxed, resumes across daily fires via its cursor.
+      let startStatus: "Active" | "Canceled" | "Never Enrolled" | undefined;
       let startPage: number | undefined;
       let chunks = 0;
+      let finished = false;
       while (Date.now() - started < TOTAL_BUDGET_MS) {
-        const result = await backfillRevenueForRange({
+        const r = await backfillRevenueForRange({
           tenantId: tenant.id,
           from,
           to,
-          deadlineMs: PHX_CHUNK_DEADLINE_MS,
+          deadlineMs: 55_000,
           startStatus,
           startPage,
         });
         chunks++;
-        if (result.progress.finished) {
-          phoenix.push({
-            tenant: tenant.display_name,
-            revenueWalk: "finished",
-            chunks,
-          });
+        if (r.progress.finished) {
+          finished = true;
           break;
         }
-        startStatus = result.progress.nextStatus ?? undefined;
-        startPage = result.progress.nextPage ?? undefined;
+        startStatus = r.progress.nextStatus ?? undefined;
+        startPage = r.progress.nextPage ?? undefined;
         if (Date.now() - started >= TOTAL_BUDGET_MS) {
           phoenixTimedOut = true;
-          phoenix.push({
-            tenant: tenant.display_name,
-            revenueWalk: "time-boxed (resumes next daily fire)",
-            chunks,
-            nextStatus: startStatus,
-            nextPage: startPage,
-          });
           break;
         }
       }
+      phoenix.push({
+        tenant: tenant.display_name,
+        billing: "partner_api_walk",
+        revenueWalk: finished ? "finished" : "time-boxed (resumes next fire)",
+        chunks,
+      });
     }
   }
 

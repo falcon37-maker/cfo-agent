@@ -7,7 +7,10 @@ import {
   loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
-import { loadPaysightSubsByDate } from "@/lib/paysight/queries";
+import {
+  loadPaysightSubsByDate,
+  loadPaysightFrontendOrdersByDate,
+} from "@/lib/paysight/queries";
 
 // Stores for which PHX/Solvpath is the source of truth for revenue. For any
 // other store, Shopify's daily_pnl stays the source (future stores that only
@@ -18,7 +21,7 @@ const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
 // drop-shipping stores. NOVA/NURA/KOVA are subscription stores and live on the
 // Subscriptions page, so they're excluded from the Stores ledger.
 const DROPSHIP_FEE_RATE = 0.039; // ~3.9% processing fee for drop-ship stores
-const SUBS_FEE_RATE = 0.16; // ~16% processing fee for PHX subscriptions
+const SUBS_FEE_RATE = 0.163; // ~16.3% processing fee for PHX subscriptions
 
 export type StoreInfo = {
   id: string;
@@ -417,10 +420,19 @@ function rollupPhxByDay(rows: PhxSnapshot[]): Map<string, PhxDayTotals> {
 export async function loadBlendedDashboardData(
   tenantId: string,
   rangeSpec?: { days: number } | { from: string; to: string },
+  opts?: { storeScope?: "all" | "subscription" },
 ): Promise<BlendedDashboardData> {
+  // "subscription" scope = only the subscription stores (NOVA/NURA/KOVA), so
+  // the Subscriptions page can reuse the full blended table (with ad spend,
+  // ROAS, etc.) but show those stores only. Client spec Jun 2026.
+  const subsOnly = opts?.storeScope === "subscription";
   const stores = await loadStores(tenantId);
-  const feeRate =
-    Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) || 0.1;
+  // Subscription stores bill through a ~16.3% processor (client spec Jun 2026);
+  // other scopes use the per-store processing_fee_pct (drop-ship ~3.9%).
+  const feeRate = subsOnly
+    ? SUBS_FEE_RATE
+    : Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) ||
+      0.1;
 
   // Resolve range.
   const today = todayUtc();
@@ -439,7 +451,12 @@ export async function loadBlendedDashboardData(
   // Pull current + prior range's Shopify rows in one query.
   const priorTo = addDays(from, -1);
   const priorFrom = addDays(priorTo, -(days - 1));
-  const allPnl = await loadPnlRowsInRange(priorFrom, to, tenantId);
+  const allPnlRaw = await loadPnlRowsInRange(priorFrom, to, tenantId);
+  // In subscription scope, keep only the subscription stores' Shopify rows so
+  // the whole blended view (orders/revenue/ad spend/ROAS) reflects just them.
+  const allPnl = subsOnly
+    ? allPnlRaw.filter((r) => PHX_STORE_IDS.has(r.store_id))
+    : allPnlRaw;
   const curPnl = allPnl.filter((r) => r.date >= from && r.date <= to);
   const priorPnl = allPnl.filter(
     (r) => r.date >= priorFrom && r.date <= priorTo,
@@ -465,7 +482,22 @@ export async function loadBlendedDashboardData(
     to,
     phxStoreIds,
   );
+  // Frontend (checkout) order count per day, counted PER CUSTOMER from the
+  // Paysight gateway so upsells (a second charge on the same customer/order)
+  // don't double-count. Client spec Jun 2026.
+  const paysightFrontendCur = await loadPaysightFrontendOrdersByDate(
+    tenantId,
+    from,
+    to,
+    phxStoreIds,
+  );
   const paysightPrior = await loadPaysightSubsByDate(
+    tenantId,
+    priorFrom,
+    priorTo,
+    phxStoreIds,
+  );
+  const paysightFrontendPrior = await loadPaysightFrontendOrdersByDate(
     tenantId,
     priorFrom,
     priorTo,
@@ -519,6 +551,15 @@ export async function loadBlendedDashboardData(
     const subs = phx.subs + (pay?.subs ?? 0);
     const subsBilled = phx.subsBilledCount + (pay?.subOrders ?? 0);
 
+    // Frontend order count = non-PHX (drop-ship) Shopify orders + PHX
+    // storefront orders. For PHX stores we prefer the Paysight gateway's
+    // per-customer count (dedupes upsells — client spec Jun 2026), but BEFORE
+    // the Paysight migration (~late May 2026) there are no Paysight rows, so
+    // we fall back to the PHX stores' Shopify order count for those days.
+    const phxPayFront = paysightFrontendCur.get(cur) ?? 0;
+    const phxFrontOrders = phxPayFront > 0 ? phxPayFront : phxShop.order_count;
+    const frontendOrders = nonPhxShop.order_count + phxFrontOrders;
+
     // Money story (mirrors /pnl, post-migration): store revenue = Shopify
     // checkout for ALL stores — PHX stores included, since that's where
     // newly-acquired dollars live now. The subscription platforms add their
@@ -537,12 +578,12 @@ export async function loadBlendedDashboardData(
       shopify_revenue: round2(nonPhxShop.revenue),
       shopify_ad_spend: round2(allShop.ad_spend),
       shopify_net_profit: round2(nonPhxShop.net_profit),
-      shopify_orders: allShop.order_count,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phxTotal),
       phx_net_contribution: round2(phxContribution),
       phx_subs_billed: subsBilled,
+      shopify_orders: frontendOrders,
       // Frontend = Shopify checkout revenue for PHX stores (one-time +
       // newly-acquired subscription enrollments — both ring up at checkout).
       phx_frontend_revenue: round2(phxShop.revenue),
@@ -568,6 +609,10 @@ export async function loadBlendedDashboardData(
     const payP = paysightPrior.get(curP);
     const subsP = phx.subs + (payP?.subs ?? 0);
     const subsBilledP = phx.subsBilledCount + (payP?.subOrders ?? 0);
+    const phxPayFrontP = paysightFrontendPrior.get(curP) ?? 0;
+    const frontendOrdersP =
+      nonPhxShop.order_count +
+      (phxPayFrontP > 0 ? phxPayFrontP : phxShop.order_count);
     // Same money story as the current loop: billed subs (+ upsell) on top of
     // every store's Shopify checkout net.
     const phxTotalP = subsP + phx.upsell;
@@ -578,7 +623,7 @@ export async function loadBlendedDashboardData(
       shopify_revenue: round2(nonPhxShop.revenue),
       shopify_ad_spend: round2(allShop.ad_spend),
       shopify_net_profit: round2(nonPhxShop.net_profit),
-      shopify_orders: allShop.order_count,
+      shopify_orders: frontendOrdersP,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phxTotalP),

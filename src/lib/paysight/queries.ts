@@ -140,6 +140,70 @@ export type PaysightDaySubs = {
  * charged on exactly one platform, so the two never double-count.
  * Keyed by YYYY-MM-DD.
  */
+/**
+ * Frontend (checkout) order COUNT per day from Paysight, counted PER CUSTOMER
+ * so upsells don't inflate it. Client spec (Jun 2026): "an upsell generates a
+ * second order — count per customer ID so things don't get messy at scale."
+ *
+ * A frontend order = a cycle-0 charge (payment_number = 0, the at-checkout
+ * purchase) that succeeded. We count DISTINCT customer_id per day, not raw
+ * transactions, so a main purchase + an upsell on the same customer that day
+ * count as one frontend order (matches Paysight's own per-order view).
+ */
+export async function loadPaysightFrontendOrdersByDate(
+  tenantId: string,
+  from: string,
+  to: string,
+  storeIds?: string[],
+): Promise<Map<string, number>> {
+  const sb = supabaseAdmin();
+  const rows: Array<{
+    txn_date: string | null;
+    success: boolean | null;
+    customer_id: number | null;
+    payment_number: number | null;
+    application_id: number | null;
+  }> = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    let q = sb
+      .from("paysight_transactions")
+      .select("txn_date, success, customer_id, store_id, payment_number, application_id")
+      .eq("tenant_id", tenantId)
+      .gte("txn_date", from)
+      .lte("txn_date", to)
+      .eq("payment_number", 0) // cycle-0 = at-checkout frontend purchase
+      .order("txn_date", { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (storeIds && storeIds.length) q = q.in("store_id", storeIds);
+    const { data } = await q;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
+
+  // Per day, collect DISTINCT customer ids (upsell on same customer = 1 order).
+  const byDate = new Map<string, Set<number>>();
+  for (const t of rows) {
+    const date = t.txn_date as string | null;
+    if (!date || !t.success || t.customer_id == null) continue;
+    const isAdjustment =
+      t.application_id === 200 ||
+      t.application_id === 201 ||
+      t.application_id === 202;
+    if (isAdjustment) continue;
+    let set = byDate.get(date);
+    if (!set) {
+      set = new Set<number>();
+      byDate.set(date, set);
+    }
+    set.add(t.customer_id);
+  }
+  const map = new Map<string, number>();
+  for (const [date, set] of byDate) map.set(date, set.size);
+  return map;
+}
+
 export async function loadPaysightSubsByDate(
   tenantId: string,
   from: string,

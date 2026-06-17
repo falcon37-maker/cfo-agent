@@ -32,7 +32,12 @@ import { computeDailyPnl } from "@/lib/pnl/compute";
 import { hasStoreCreds } from "@/lib/shopify/stores";
 import { syncPaysightDay } from "@/lib/paysight/sync";
 import { getPaysightCreds, getSolvpathCreds } from "@/lib/integrations";
-import { backfillRevenueForRange, SUBSCRIBER_STATUSES } from "@/lib/solvpath/sync";
+import {
+  SUBSCRIBER_STATUSES,
+  backfillRevenueForRange,
+} from "@/lib/solvpath/sync";
+import { syncPhoenixPortalDay } from "@/lib/phoenix-portal/sync";
+import { hasPhoenixPortalCreds } from "@/lib/phoenix-portal/client";
 import { listCustomers } from "@/lib/solvpath/client";
 
 export const runtime = "nodejs";
@@ -232,29 +237,53 @@ export async function POST(req: NextRequest) {
           phaseBase += slice;
         }
 
-        // ── Phoenix ──
+        // ── Phoenix ── (bulk portal API, capture-only — fast + accurate)
         if (sources.has("phoenix")) {
-          emit(0, "Phoenix — subscriber counts…");
-          const creds = await getSolvpathCreds(tenantId);
-          if (creds) {
-            let counts: Record<string, number> | null = null;
-            try {
-              counts = await refreshPhoenixCounts(tenantId);
-            } catch {
-              /* ignore — counts are best-effort */
+          emit(0, "Phoenix — preparing…");
+          // Subscriber counts (PORTFOLIO) stay best-effort via the partner API.
+          let counts: Record<string, number> | null = null;
+          try {
+            counts = await refreshPhoenixCounts(tenantId);
+          } catch {
+            /* ignore — counts are best-effort */
+          }
+
+          if (await hasPhoenixPortalCreds(tenantId)) {
+            // One bulk get_details call per day → settled-capture buckets.
+            // Refresh token renews the access token automatically.
+            let billedCount = 0;
+            let billedRev = 0;
+            let failed = 0;
+            let unit = 0;
+            for (const date of dates) {
+              try {
+                const r = await syncPhoenixPortalDay(tenantId, date);
+                billedCount += r.totalBilledCount;
+                billedRev += r.totalBilledRevenue;
+              } catch {
+                failed++;
+              }
+              unit++;
+              emit(unit / dates.length, `Phoenix — ${date}`);
             }
+            result.phoenix = {
+              activeSubscribers: counts?.["Active"] ?? null,
+              billedCount,
+              billedRevenue: Math.round(billedRev * 100) / 100,
+              failed,
+              source: "portal_bulk_capture_only",
+            };
+          } else if (await getSolvpathCreds(tenantId)) {
+            // Fallback: no portal token, but partner-API creds exist — use the
+            // legacy per-customer revenue walk (chunked, time-boxed). Slower,
+            // but keeps Phoenix billing flowing until the portal is connected.
             if (!doPhoenixRevenue) {
-              emit(1, "Phoenix — counts done");
               result.phoenix = {
                 activeSubscribers: counts?.["Active"] ?? null,
                 revenueWalk: "skipped (counts only)",
-                chunks: 0,
+                source: "partner_api_walk",
               };
             } else {
-              // Revenue walk is open-ended (~5700 customers across chunks); we
-              // can't know the total up front, so we approach 100% smoothly
-              // (each chunk closes part of the remaining gap) rather than
-              // claiming an exact %.
               let startStatus:
                 | "Active"
                 | "Canceled"
@@ -263,7 +292,6 @@ export async function POST(req: NextRequest) {
               let startPage: number | undefined;
               let chunks = 0;
               let finished = false;
-              let seenTotal = 0;
               while (Date.now() - started < PHX_BUDGET_MS) {
                 const r = await backfillRevenueForRange({
                   tenantId,
@@ -274,30 +302,27 @@ export async function POST(req: NextRequest) {
                   startPage,
                 });
                 chunks++;
-                seenTotal += r.progress.customersSeen ?? 0;
                 if (r.progress.finished) {
                   finished = true;
-                  emit(1, "Phoenix — revenue walk done");
                   break;
                 }
                 startStatus = r.progress.nextStatus ?? undefined;
                 startPage = r.progress.nextPage ?? undefined;
-                // Asymptotic: 1 - 0.6^chunks closes 40% of the gap each chunk.
-                emit(
-                  1 - Math.pow(0.6, chunks),
-                  `Phoenix — revenue walk (${seenTotal} customers)`,
-                );
+                emit(1 - Math.pow(0.6, chunks), `Phoenix — partner walk`);
               }
               result.phoenix = {
                 activeSubscribers: counts?.["Active"] ?? null,
-                revenueWalk: finished
-                  ? "finished"
-                  : "time-boxed (run again to continue)",
+                revenueWalk: finished ? "finished" : "time-boxed (run again)",
                 chunks,
+                source: "partner_api_walk",
               };
             }
           } else {
-            result.phoenix = { skipped: "no creds" };
+            result.phoenix = {
+              activeSubscribers: counts?.["Active"] ?? null,
+              skipped:
+                "Phoenix not connected — add a Portal refresh token or Partner credentials",
+            };
           }
           phaseBase += slice;
         }

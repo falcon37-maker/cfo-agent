@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ping } from "@/lib/chargeblast/client";
 import { syncAlerts } from "@/lib/chargeblast/sync";
 import { listStores as listSolvpathStores } from "@/lib/solvpath/client";
+import { seedRefreshToken } from "@/lib/phoenix-portal/client";
 import { ShopifyClient } from "@/lib/shopify/client";
 import { getStoreCreds } from "@/lib/shopify/stores";
 import { requireTenant, ADMIN_ROLES, WRITE_DATA_ROLES } from "@/lib/tenant";
@@ -107,6 +108,10 @@ export async function saveSolvpathAction(formData: FormData) {
   const partnerTokenIn = String(formData.get("partner_token") ?? "").trim();
   const bearerTokenIn = String(formData.get("bearer_token") ?? "").trim();
   const baseUrl = String(formData.get("base_url") ?? "").trim() || undefined;
+  // Phoenix portal refresh_token — powers the bulk get_details billing sync.
+  // Paste it from the logged-in portal (localStorage.refresh_token). It's
+  // validated + stored encrypted; rotated automatically on each refresh.
+  const portalTokenIn = String(formData.get("portal_refresh_token") ?? "").trim();
 
   await saveSolvpathCreds(tenant.id, {
     partnerId,
@@ -114,6 +119,15 @@ export async function saveSolvpathAction(formData: FormData) {
     bearerToken: bearerTokenIn === "CLEAR" ? "" : bearerTokenIn || undefined,
     baseUrl,
   });
+
+  if (portalTokenIn && portalTokenIn.split(".").length === 3) {
+    try {
+      await seedRefreshToken(tenant.id, portalTokenIn);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      redirect(`/settings/integrations?sp_save=fail&sp_msg=${encode(msg)}`);
+    }
+  }
   revalidatePath("/settings/integrations");
   redirect("/settings/integrations?sp_save=ok");
 }

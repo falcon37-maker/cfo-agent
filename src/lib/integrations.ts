@@ -36,7 +36,8 @@ export type Provider =
   | "chargeblast"
   | "solvpath"
   | "paysight"
-  | "zoho_books";
+  | "zoho_books"
+  | "phoenix_portal";
 
 type IntegrationRow = {
   id: string;
@@ -267,6 +268,7 @@ export async function describeIntegrationStatus(
     solvpath: { configured: false, fields: [], lastSyncedAt: null },
     paysight: { configured: false, fields: [], lastSyncedAt: null },
     zoho_books: { configured: false, fields: [], lastSyncedAt: null },
+    phoenix_portal: { configured: false, fields: [], lastSyncedAt: null },
   };
   for (const r of (data ?? []) as Array<{
     provider: Provider;

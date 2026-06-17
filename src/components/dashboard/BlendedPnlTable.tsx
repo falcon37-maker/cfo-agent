@@ -5,13 +5,23 @@ type Props = {
   rows: BlendedDailyRow[];
   /** Range pills etc — rendered in the card head's right side. */
   rangeControl?: React.ReactNode;
+  /** Show a Fees column = subscription billed × feeRate. Used on the
+   *  Subscriptions page (client spec: subscription processor fee ~16.3%).
+   *  Net Profit already nets out this fee — the column is for visibility. */
+  showFees?: boolean;
+  feeRate?: number;
 };
 
 /**
  * Blended daily P&L — Shopify front-end + PHX recurring side-by-side,
  * with a Total column, Net Profit pill, and a totals + averages footer.
  */
-export function BlendedPnlTable({ rows, rangeControl }: Props) {
+export function BlendedPnlTable({
+  rows,
+  rangeControl,
+  showFees = false,
+  feeRate = 0,
+}: Props) {
   const totals = rows.reduce(
     (acc, r) => {
       acc.orders += r.shopify_orders;
@@ -74,6 +84,7 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 {showManual ? <th className="num">Manual Rev</th> : null}
                 <th className="num">Total</th>
                 <th className="num">COGS</th>
+                {showFees ? <th className="num">Fees</th> : null}
                 <th className="num">Ad Spend</th>
                 <th className="num">ROAS</th>
                 <th className="num">Net Profit</th>
@@ -121,6 +132,13 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                       {fmtMoney(r.total_revenue)}
                     </td>
                     <td className="num muted">{fmtMoney(r.shopify_cogs)}</td>
+                    {showFees ? (
+                      <td className="num muted">
+                        {r.phx_subs_revenue > 0
+                          ? fmtMoney(r.phx_subs_revenue * feeRate)
+                          : "—"}
+                      </td>
+                    ) : null}
                     <td className="num muted">{fmtMoney(r.shopify_ad_spend)}</td>
                     <td
                       className={`num roas ${
@@ -162,6 +180,9 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
                 ) : null}
                 <td className="num">{fmtMoney(totals.total_rev)}</td>
                 <td className="num">{fmtMoney(totals.cogs)}</td>
+                {showFees ? (
+                  <td className="num">{fmtMoney(totals.subs_rev * feeRate)}</td>
+                ) : null}
                 <td className="num">{fmtMoney(totals.ad_spend)}</td>
                 <td
                   className={`num ${

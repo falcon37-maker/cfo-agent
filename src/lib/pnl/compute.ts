@@ -68,7 +68,29 @@ export async function computeDailyPnl(
     .eq("date", date);
   if (adErr) throw new Error(`daily_ad_spend lookup failed: ${adErr.message}`);
 
-  const cogsPerOrder = Number(store.default_cogs_per_order ?? 0);
+  // COGS is ALWAYS the manually-entered value — the supplier provides it daily
+  // (client spec Jun 2026, no formula). Read the latest manual entry from
+  // cogs_entries; if there's none for this day, preserve whatever COGS is
+  // already on the daily_pnl row so a re-sync never wipes a manual figure. The
+  // old `order_count × default_cogs_per_order` formula (which overwrote the
+  // VA's entries on every sync) is removed.
+  const { data: cogsEntry } = await sb
+    .from("cogs_entries")
+    .select("cogs")
+    .eq("tenant_id", tenantId)
+    .eq("store_id", code)
+    .eq("date", date)
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { data: existingPnl } = await sb
+    .from("daily_pnl")
+    .select("cogs")
+    .eq("tenant_id", tenantId)
+    .eq("store_id", code)
+    .eq("date", date)
+    .maybeSingle();
+
   const feePct = Number(store.processing_fee_pct ?? 0);
 
   // `revenue` = Shopify "Net sales" = gross_sales (already net of discounts)
@@ -77,7 +99,10 @@ export async function computeDailyPnl(
   const grossSales = Number(orders.gross_sales);
   const refunds = Number(orders.refunds);
   const revenue = r2(grossSales - refunds);
-  const cogs = Number(orders.order_count) * cogsPerOrder;
+  const cogs =
+    cogsEntry?.cogs != null
+      ? Number(cogsEntry.cogs)
+      : Number(existingPnl?.cogs ?? 0);
   const fees = revenue * feePct;
   const adSpend = (adRows ?? []).reduce((sum, r) => sum + Number(r.spend ?? 0), 0);
 
