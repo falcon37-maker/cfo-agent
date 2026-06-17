@@ -421,13 +421,13 @@ export default async function SubscriptionsOverviewPage({
           <div>
             <div className="card-title">Daily ledger · subscriptions</div>
             <div className="card-sub">
-              Per-day billed subscriptions.{" "}
-              <span style={{ color: "var(--accent)" }}>Subscription Count</span>{" "}
-              (number of billed charges) +{" "}
+              Per-day billed subscriptions from the gateways.{" "}
+              <span style={{ color: "var(--accent)" }}>Subs Billed</span>{" "}
+              (payments captured) +{" "}
               <span style={{ color: "var(--positive)" }}>
-                Subscription Build
+                Subscription Billed
               </span>{" "}
-              (total billed revenue: new + recurring + salvage), across PHX
+              (amount billed: new + recurring + salvage), straight from PHX
               &amp; Paysight.
             </div>
           </div>
@@ -437,8 +437,8 @@ export default async function SubscriptionsOverviewPage({
             <thead>
               <tr>
                 <th>Date</th>
-                <th className="num">Subscription Count</th>
-                <th className="num">Subscription Build</th>
+                <th className="num">Subs Billed</th>
+                <th className="num">Subscription Billed</th>
                 <th className="num">COGS</th>
                 <th className="num">Fees</th>
                 <th className="num">Gross Profit</th>

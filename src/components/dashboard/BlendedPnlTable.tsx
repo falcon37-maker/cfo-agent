@@ -68,9 +68,9 @@ export function BlendedPnlTable({ rows, rangeControl }: Props) {
               <tr>
                 <th>Date</th>
                 <th className="num">Shopify Orders</th>
-                <th className="num">Subscription Count</th>
+                <th className="num">Subs Billed</th>
                 <th className="num">Shopify Revenue</th>
-                <th className="num">Subscription Build</th>
+                <th className="num">Subscription Billed</th>
                 {showManual ? <th className="num">Manual Rev</th> : null}
                 <th className="num">Total</th>
                 <th className="num">COGS</th>
