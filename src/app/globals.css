@@ -536,6 +536,22 @@ kbd {
   border-color: var(--border-strong) !important;
   color: var(--text) !important;
 }
+/* Legend + axis labels — drive from theme tokens so they stay readable in
+   BOTH light and dark mode (the JS palette was hard-coded for dark, which made
+   the labels invisible on the white theme). */
+.apexcharts-legend-text {
+  color: var(--text) !important;
+}
+.apexcharts-text,
+.apexcharts-xaxis-label,
+.apexcharts-yaxis-label,
+.apexcharts-datalabel-label,
+.apexcharts-datalabel-value {
+  fill: var(--muted-strong) !important;
+}
+.apexcharts-gridline {
+  stroke: var(--border) !important;
+}
 
 .dashboard-narrow {
   max-width: 1600px;
@@ -1045,9 +1061,20 @@ kbd {
 .table-wrap {
   overflow: auto;
 }
+/* P&L / ledger tables: cap the height so the body scrolls INSIDE the card
+   (scrollbar stays within the table) and the sticky header actually sticks. */
+.table-card .table-wrap {
+  max-height: 560px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
 .pnl-table {
   width: 100%;
-  border-collapse: collapse;
+  /* `separate` (not `collapse`) so position:sticky works on <th> — collapsed
+     borders break sticky headers in most browsers. Borders are drawn per-cell
+     below, so the visual is identical. */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 12.5px;
 }
 .pnl-table th,

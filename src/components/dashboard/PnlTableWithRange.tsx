@@ -72,5 +72,12 @@ export function PnlTableWithRange({ pool }: { pool: BlendedDailyRow[] }) {
     </div>
   );
 
-  return <BlendedPnlTable rows={rows} rangeControl={control} />;
+  return (
+    <BlendedPnlTable
+      rows={rows}
+      rangeControl={control}
+      showFees
+      feesMode="split"
+    />
+  );
 }

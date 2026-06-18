@@ -420,12 +420,23 @@ function rollupPhxByDay(rows: PhxSnapshot[]): Map<string, PhxDayTotals> {
 export async function loadBlendedDashboardData(
   tenantId: string,
   rangeSpec?: { days: number } | { from: string; to: string },
-  opts?: { storeScope?: "all" | "subscription" },
+  opts?: { storeScope?: "all" | "subscription"; storeIds?: string[] },
 ): Promise<BlendedDashboardData> {
   // "subscription" scope = only the subscription stores (NOVA/NURA/KOVA), so
   // the Subscriptions page can reuse the full blended table (with ad spend,
   // ROAS, etc.) but show those stores only. Client spec Jun 2026.
   const subsOnly = opts?.storeScope === "subscription";
+  // Optional store filter (e.g. the Subscriptions page's KOVA/NOVA/NURA chips).
+  // When set, every part of the blend is restricted to these stores.
+  const storeFilter =
+    opts?.storeIds && opts.storeIds.length
+      ? new Set(opts.storeIds.map((s) => s.toUpperCase()))
+      : null;
+  const inScope = (storeId: string) => {
+    if (subsOnly && !PHX_STORE_IDS.has(storeId)) return false;
+    if (storeFilter && !storeFilter.has(storeId.toUpperCase())) return false;
+    return true;
+  };
   const stores = await loadStores(tenantId);
   // Subscription stores bill through a ~16.3% processor (client spec Jun 2026);
   // other scopes use the per-store processing_fee_pct (drop-ship ~3.9%).
@@ -452,11 +463,12 @@ export async function loadBlendedDashboardData(
   const priorTo = addDays(from, -1);
   const priorFrom = addDays(priorTo, -(days - 1));
   const allPnlRaw = await loadPnlRowsInRange(priorFrom, to, tenantId);
-  // In subscription scope, keep only the subscription stores' Shopify rows so
-  // the whole blended view (orders/revenue/ad spend/ROAS) reflects just them.
-  const allPnl = subsOnly
-    ? allPnlRaw.filter((r) => PHX_STORE_IDS.has(r.store_id))
-    : allPnlRaw;
+  // Restrict the Shopify rows to the in-scope stores (subscription scope and/or
+  // an explicit store filter), so orders/revenue/ad spend/ROAS reflect them.
+  const allPnl =
+    subsOnly || storeFilter
+      ? allPnlRaw.filter((r) => inScope(r.store_id))
+      : allPnlRaw;
   const curPnl = allPnl.filter((r) => r.date >= from && r.date <= to);
   const priorPnl = allPnl.filter(
     (r) => r.date >= priorFrom && r.date <= priorTo,
@@ -466,7 +478,7 @@ export async function loadBlendedDashboardData(
   // already represents one store's actual transactions on one day.
   const phxStoreIds = stores
     .map((s) => s.id)
-    .filter((id) => PHX_STORE_IDS.has(id));
+    .filter((id) => PHX_STORE_IDS.has(id) && inScope(id));
   const phxCur = await loadPhxDailyRows(from, to, phxStoreIds, tenantId);
   const phxPrior = await loadPhxDailyRows(priorFrom, priorTo, phxStoreIds, tenantId);
   const phxByDayCur = rollupPhxByDay(phxCur);
@@ -593,7 +605,20 @@ export async function loadBlendedDashboardData(
       // Total = every store's Shopify checkout + billed subscription revenue
       // (+ legacy PHX upsell) + manual — same shape as the /pnl ledger.
       total_revenue: round2(allShop.revenue + phxTotal + manual),
-      total_net_profit: round2(nonPhxContribution + phxContribution + manual),
+      // Net profit. In subscription scope the processor fee (~16.3%) applies to
+      // the WHOLE Total (Shopify + subscription), per client spec, so we
+      // recompute: Total − COGS − fee(Total) − ad_spend. Otherwise use the
+      // blended contribution (fee only on the subscription slice).
+      total_net_profit: subsOnly
+        ? round2(
+            allShop.revenue +
+              phxTotal +
+              manual -
+              allShop.cogs -
+              (allShop.revenue + phxTotal + manual) * feeRate -
+              allShop.ad_spend,
+          )
+        : round2(nonPhxContribution + phxContribution + manual),
     });
     cur = addDays(cur, 1);
   }
@@ -634,7 +659,16 @@ export async function loadBlendedDashboardData(
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manualP),
       total_revenue: round2(allShop.revenue + phxTotalP + manualP),
-      total_net_profit: round2(nonPhxShop.net_profit + phxContribution + manualP),
+      total_net_profit: subsOnly
+        ? round2(
+            allShop.revenue +
+              phxTotalP +
+              manualP -
+              allShop.cogs -
+              (allShop.revenue + phxTotalP + manualP) * feeRate -
+              allShop.ad_spend,
+          )
+        : round2(nonPhxShop.net_profit + phxContribution + manualP),
     });
     curP = addDays(curP, 1);
   }

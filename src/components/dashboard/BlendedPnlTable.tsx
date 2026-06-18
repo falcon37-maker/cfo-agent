@@ -1,16 +1,36 @@
 import type { BlendedDailyRow } from "@/lib/pnl/queries";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 
+// Processing-fee rates (client spec Jun 2026):
+//   drop-ship Shopify stores  → 3.9% of their store revenue
+//   subscription (PHX) stores → 16.3% of their total (checkout + subs billed)
+const DROPSHIP_FEE_RATE = 0.039;
+const SUBS_FEE_RATE = 0.163;
+
 type Props = {
   rows: BlendedDailyRow[];
   /** Range pills etc — rendered in the card head's right side. */
   rangeControl?: React.ReactNode;
-  /** Show a Fees column = subscription billed × feeRate. Used on the
-   *  Subscriptions page (client spec: subscription processor fee ~16.3%).
-   *  Net Profit already nets out this fee — the column is for visibility. */
+  /** Show a Fees column. Net Profit already nets out this fee — the column is
+   *  for visibility. */
   showFees?: boolean;
+  /** "total"  → whole Total × feeRate (Subscriptions page; subs stores only).
+   *  "split"  → drop-ship revenue × 3.9% + PHX revenue × 16.3% (main
+   *             Dashboard, which blends both store types). */
+  feesMode?: "total" | "split";
   feeRate?: number;
 };
+
+/** Per-row processing fee. In "split" mode the drop-ship (non-PHX) Shopify
+ *  revenue is charged 3.9% and the PHX subscription revenue 16.3%. */
+function rowFee(r: BlendedDailyRow, mode: "total" | "split", rate: number): number {
+  if (mode === "split") {
+    const phxRevenue =
+      r.phx_frontend_revenue + r.phx_subs_revenue + r.phx_upsell_revenue;
+    return r.shopify_revenue * DROPSHIP_FEE_RATE + phxRevenue * SUBS_FEE_RATE;
+  }
+  return r.total_revenue * rate;
+}
 
 /**
  * Blended daily P&L — Shopify front-end + PHX recurring side-by-side,
@@ -20,8 +40,14 @@ export function BlendedPnlTable({
   rows,
   rangeControl,
   showFees = false,
+  feesMode = "total",
   feeRate = 0,
 }: Props) {
+  // Total fees = sum of each row's fee (handles the split rates correctly).
+  const totalFees = rows.reduce((s, r) => s + rowFee(r, feesMode, feeRate), 0);
+  // Show newest day first (day-wise descending) regardless of how the data
+  // layer ordered the array. Totals are order-independent (a sum).
+  const sortedRows = [...rows].sort((a, b) => b.date.localeCompare(a.date));
   const totals = rows.reduce(
     (acc, r) => {
       acc.orders += r.shopify_orders;
@@ -91,7 +117,7 @@ export function BlendedPnlTable({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {sortedRows.map((r) => {
                 const roas =
                   r.shopify_ad_spend > 0 ? r.total_revenue / r.shopify_ad_spend : 0;
                 const strongRoas = roas >= 3.0;
@@ -134,8 +160,8 @@ export function BlendedPnlTable({
                     <td className="num muted">{fmtMoney(r.shopify_cogs)}</td>
                     {showFees ? (
                       <td className="num muted">
-                        {r.phx_subs_revenue > 0
-                          ? fmtMoney(r.phx_subs_revenue * feeRate)
+                        {r.total_revenue > 0
+                          ? fmtMoney(rowFee(r, feesMode, feeRate))
                           : "—"}
                       </td>
                     ) : null}
@@ -181,7 +207,7 @@ export function BlendedPnlTable({
                 <td className="num">{fmtMoney(totals.total_rev)}</td>
                 <td className="num">{fmtMoney(totals.cogs)}</td>
                 {showFees ? (
-                  <td className="num">{fmtMoney(totals.subs_rev * feeRate)}</td>
+                  <td className="num">{fmtMoney(totalFees)}</td>
                 ) : null}
                 <td className="num">{fmtMoney(totals.ad_spend)}</td>
                 <td

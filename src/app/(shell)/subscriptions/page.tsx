@@ -315,7 +315,11 @@ export default async function SubscriptionsOverviewPage({
       loadPaysightSubsByDate(tenant.id, from, to, selectedPhx),
       // Full blended P&L (same as main dashboard) but scoped to the
       // subscription stores only — client wants ad spend / ROAS / totals here.
-      loadBlendedDashboardData(tenant.id, { from, to }, { storeScope: "subscription" }),
+      loadBlendedDashboardData(
+        tenant.id,
+        { from, to },
+        { storeScope: "subscription", storeIds: selectedPhx },
+      ),
     ]);
 
   const ledger = buildLedger(phxDays, pnlRows, paysightSubsByDate);
