@@ -53,6 +53,5 @@ export async function signUpAction(formData: FormData) {
   if (error) {
     redirect(`/signup?err=${encodeURIComponent(error.message).slice(0, 200)}`);
   }
-
   redirect("/onboarding");
 }
