@@ -51,6 +51,8 @@ export function BlendedPnlTable({
   const totals = rows.reduce(
     (acc, r) => {
       acc.orders += r.shopify_orders;
+      acc.new_subs += r.new_subs;
+      acc.upsell += r.upsell_orders;
       acc.subs += r.phx_subs_billed;
       // Frontend = PHX Direct + Initial (acquisition), plus revenue from any
       // store NOT on PHX (which still flows through shopify_revenue).
@@ -69,6 +71,8 @@ export function BlendedPnlTable({
     },
     {
       orders: 0,
+      new_subs: 0,
+      upsell: 0,
       subs: 0,
       frontend_rev: 0,
       subs_rev: 0,
@@ -103,7 +107,8 @@ export function BlendedPnlTable({
             <thead>
               <tr>
                 <th>Date</th>
-                <th className="num">Shopify Orders</th>
+                <th className="num">New Subs</th>
+                <th className="num">Upsell</th>
                 <th className="num">Subs Billed</th>
                 <th className="num">Shopify Revenue</th>
                 <th className="num">Subscription Billed</th>
@@ -132,7 +137,10 @@ export function BlendedPnlTable({
                 return (
                   <tr key={r.date}>
                     <td>{fmtDate(r.date)}</td>
-                    <td className="num muted">{fmtInt(r.shopify_orders)}</td>
+                    <td className="num muted">{fmtInt(r.new_subs)}</td>
+                    <td className="num muted">
+                      {r.upsell_orders > 0 ? fmtInt(r.upsell_orders) : "—"}
+                    </td>
                     <td className="num muted">
                       {r.phx_subs_billed > 0 ? fmtInt(r.phx_subs_billed) : "—"}
                     </td>
@@ -189,7 +197,10 @@ export function BlendedPnlTable({
             <tfoot>
               <tr className="tfoot-row">
                 <td>TOTAL</td>
-                <td className="num">{fmtInt(totals.orders)}</td>
+                <td className="num">{fmtInt(totals.new_subs)}</td>
+                <td className="num">
+                  {totals.upsell > 0 ? fmtInt(totals.upsell) : "—"}
+                </td>
                 <td className="num">
                   {totals.subs > 0 ? fmtInt(totals.subs) : "—"}
                 </td>

@@ -51,7 +51,8 @@ export async function loadPaysightSummary(
       .eq("tenant_id", tenantId)
       .gte("txn_date", from)
       .lte("txn_date", to)
-      .order("txn_date", { ascending: true })
+      // Unique-key ordering for deterministic pagination (see note below).
+      .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (!data || data.length === 0) break;
     txns.push(...data);
@@ -140,22 +141,33 @@ export type PaysightDaySubs = {
  * charged on exactly one platform, so the two never double-count.
  * Keyed by YYYY-MM-DD.
  */
+export type PaysightFrontend = {
+  /** New subscribers = DISTINCT customers that day (de-duped). The clean CPA /
+   *  cost-per-sub denominator. */
+  newSubs: number;
+  /** Upsell orders = extra cycle-0 orders from a customer who already has one
+   *  that day (2nd+ purchase = upsell add-on). newSubs + upsell = total orders. */
+  upsell: number;
+};
+
 /**
- * Frontend (checkout) order COUNT per day from Paysight, counted PER CUSTOMER
- * so upsells don't inflate it. Client spec (Jun 2026): "an upsell generates a
- * second order — count per customer ID so things don't get messy at scale."
+ * Frontend (checkout) orders per day from Paysight, split into NEW SUBS
+ * (distinct customers — the clean count) and UPSELL ORDERS (extra orders from
+ * the same customer). Client spec (Jun 2026): an upsell generates a 2nd order,
+ * so count new subs per customer ID and break upsells out separately, since
+ * order count is the CPA / cost-per-sub denominator.
  *
- * A frontend order = a cycle-0 charge (payment_number = 0, the at-checkout
- * purchase) that succeeded. We count DISTINCT customer_id per day, not raw
- * transactions, so a main purchase + an upsell on the same customer that day
- * count as one frontend order (matches Paysight's own per-order view).
+ * A frontend order = a successful cycle-0 charge (payment_number = 0). Per day:
+ *   newSubs = distinct customer_id
+ *   upsell  = (successful cycle-0 txns) − newSubs
+ *   total   = newSubs + upsell  (ties out to the per-transaction count)
  */
 export async function loadPaysightFrontendOrdersByDate(
   tenantId: string,
   from: string,
   to: string,
   storeIds?: string[],
-): Promise<Map<string, number>> {
+): Promise<Map<string, PaysightFrontend>> {
   const sb = supabaseAdmin();
   const rows: Array<{
     txn_date: string | null;
@@ -173,7 +185,12 @@ export async function loadPaysightFrontendOrdersByDate(
       .gte("txn_date", from)
       .lte("txn_date", to)
       .eq("payment_number", 0) // cycle-0 = at-checkout frontend purchase
-      .order("txn_date", { ascending: true })
+      // Order by a UNIQUE key (id) so pagination is deterministic. Ordering by
+      // txn_date alone is non-deterministic across page boundaries when many
+      // rows share a date — Postgres may repeat or skip rows between pages,
+      // which silently corrupted the per-day distinct-customer counts over wide
+      // windows (e.g. Jun 12 read 86 distinct in a 90-day pull vs 104 correct).
+      .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (storeIds && storeIds.length) q = q.in("store_id", storeIds);
     const { data } = await q;
@@ -182,8 +199,8 @@ export async function loadPaysightFrontendOrdersByDate(
     if (data.length < PAGE) break;
   }
 
-  // Per day, collect DISTINCT customer ids (upsell on same customer = 1 order).
-  const byDate = new Map<string, Set<number>>();
+  // Per day: distinct customers (= new subs) and total successful cycle-0 txns.
+  const byDate = new Map<string, { customers: Set<number>; total: number }>();
   for (const t of rows) {
     const date = t.txn_date as string | null;
     if (!date || !t.success || t.customer_id == null) continue;
@@ -192,15 +209,19 @@ export async function loadPaysightFrontendOrdersByDate(
       t.application_id === 201 ||
       t.application_id === 202;
     if (isAdjustment) continue;
-    let set = byDate.get(date);
-    if (!set) {
-      set = new Set<number>();
-      byDate.set(date, set);
+    let bucket = byDate.get(date);
+    if (!bucket) {
+      bucket = { customers: new Set<number>(), total: 0 };
+      byDate.set(date, bucket);
     }
-    set.add(t.customer_id);
+    bucket.customers.add(t.customer_id);
+    bucket.total += 1;
   }
-  const map = new Map<string, number>();
-  for (const [date, set] of byDate) map.set(date, set.size);
+  const map = new Map<string, PaysightFrontend>();
+  for (const [date, b] of byDate) {
+    const newSubs = b.customers.size;
+    map.set(date, { newSubs, upsell: b.total - newSubs });
+  }
   return map;
 }
 
@@ -230,7 +251,8 @@ export async function loadPaysightSubsByDate(
       .gte("txn_date", from)
       .lte("txn_date", to)
       .gte("payment_number", 1) // billed rebills only — see doc comment
-      .order("txn_date", { ascending: true })
+      // Unique-key ordering for deterministic pagination (see note above).
+      .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (storeIds && storeIds.length) q = q.in("store_id", storeIds);
     const { data } = await q;

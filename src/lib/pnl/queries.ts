@@ -299,7 +299,9 @@ export type BlendedDailyRow = {
   shopify_revenue: number; // non-PHX stores only
   shopify_ad_spend: number;
   shopify_net_profit: number;
-  shopify_orders: number; // count, all stores
+  shopify_orders: number; // = new_subs + upsell_orders (total frontend orders)
+  new_subs: number; // distinct customers (de-duped) — the clean CPA denominator
+  upsell_orders: number; // extra same-customer orders (upsell add-ons)
   shopify_cogs: number;
   shopify_refunds: number;
   phx_revenue: number; // PHX total (frontend + subs + upsell), per-day actual
@@ -321,6 +323,8 @@ export type BlendedTotals = {
   shopify_ad_spend: number;
   shopify_net_profit: number;
   shopify_orders: number;
+  new_subs: number;
+  upsell_orders: number;
   shopify_cogs: number;
   shopify_refunds: number;
   phx_revenue: number;
@@ -568,9 +572,19 @@ export async function loadBlendedDashboardData(
     // per-customer count (dedupes upsells — client spec Jun 2026), but BEFORE
     // the Paysight migration (~late May 2026) there are no Paysight rows, so
     // we fall back to the PHX stores' Shopify order count for those days.
-    const phxPayFront = paysightFrontendCur.get(cur) ?? 0;
-    const phxFrontOrders = phxPayFront > 0 ? phxPayFront : phxShop.order_count;
-    const frontendOrders = nonPhxShop.order_count + phxFrontOrders;
+    // PHX storefront orders from Paysight split into new subs (distinct
+    // customers) + upsell (extra same-customer orders). Pre-migration days have
+    // no Paysight rows → fall back to the PHX Shopify order count (all "new").
+    const phxFront = paysightFrontendCur.get(cur);
+    const phxNewSubs = phxFront ? phxFront.newSubs : phxShop.order_count;
+    const phxUpsell = phxFront ? phxFront.upsell : 0;
+    // "New Subs" = subscription-store acquisitions ONLY (PHX/Paysight distinct
+    // customers). Client spec (Jun 2026): drop-ship Shopify orders are NOT new
+    // subscribers, so they're excluded from this CPA/cost-per-sub denominator
+    // (they still count in total revenue / order figures via shopify_revenue).
+    const newSubs = phxNewSubs;
+    const upsellOrders = phxUpsell;
+    const frontendOrders = newSubs + upsellOrders;
 
     // Money story (mirrors /pnl, post-migration): store revenue = Shopify
     // checkout for ALL stores — PHX stores included, since that's where
@@ -596,6 +610,8 @@ export async function loadBlendedDashboardData(
       phx_net_contribution: round2(phxContribution),
       phx_subs_billed: subsBilled,
       shopify_orders: frontendOrders,
+      new_subs: newSubs,
+      upsell_orders: upsellOrders,
       // Frontend = Shopify checkout revenue for PHX stores (one-time +
       // newly-acquired subscription enrollments — both ring up at checkout).
       phx_frontend_revenue: round2(phxShop.revenue),
@@ -634,10 +650,13 @@ export async function loadBlendedDashboardData(
     const payP = paysightPrior.get(curP);
     const subsP = phx.subs + (payP?.subs ?? 0);
     const subsBilledP = phx.subsBilledCount + (payP?.subOrders ?? 0);
-    const phxPayFrontP = paysightFrontendPrior.get(curP) ?? 0;
-    const frontendOrdersP =
-      nonPhxShop.order_count +
-      (phxPayFrontP > 0 ? phxPayFrontP : phxShop.order_count);
+    const phxFrontP = paysightFrontendPrior.get(curP);
+    const phxNewSubsP = phxFrontP ? phxFrontP.newSubs : phxShop.order_count;
+    const phxUpsellP = phxFrontP ? phxFrontP.upsell : 0;
+    // New Subs = subscription stores only (drop-ship excluded — see current loop).
+    const newSubsP = phxNewSubsP;
+    const upsellOrdersP = phxUpsellP;
+    const frontendOrdersP = newSubsP + upsellOrdersP;
     // Same money story as the current loop: billed subs (+ upsell) on top of
     // every store's Shopify checkout net.
     const phxTotalP = subsP + phx.upsell;
@@ -649,6 +668,8 @@ export async function loadBlendedDashboardData(
       shopify_ad_spend: round2(allShop.ad_spend),
       shopify_net_profit: round2(nonPhxShop.net_profit),
       shopify_orders: frontendOrdersP,
+      new_subs: newSubsP,
+      upsell_orders: upsellOrdersP,
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phxTotalP),
@@ -711,6 +732,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_ad_spend = 0,
     shopify_net_profit = 0,
     shopify_orders = 0,
+    new_subs = 0,
+    upsell_orders = 0,
     shopify_cogs = 0,
     shopify_refunds = 0,
     phx_revenue = 0,
@@ -725,6 +748,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_ad_spend += r.shopify_ad_spend;
     shopify_net_profit += r.shopify_net_profit;
     shopify_orders += r.shopify_orders;
+    new_subs += r.new_subs;
+    upsell_orders += r.upsell_orders;
     shopify_cogs += r.shopify_cogs;
     shopify_refunds += r.shopify_refunds;
     phx_revenue += r.phx_revenue;
@@ -749,6 +774,8 @@ function sumBlended(rows: BlendedDailyRow[]): BlendedTotals {
     shopify_ad_spend: round2(shopify_ad_spend),
     shopify_net_profit: round2(shopify_net_profit),
     shopify_orders,
+    new_subs,
+    upsell_orders,
     shopify_cogs: round2(shopify_cogs),
     shopify_refunds: round2(shopify_refunds),
     phx_revenue: round2(phx_revenue),
