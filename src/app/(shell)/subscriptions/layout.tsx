@@ -1,4 +1,5 @@
 import { SubsTabs } from "@/components/subscriptions/SubsTabs";
+import { SubsSearchProvider } from "@/components/subscriptions/SubsTableSearch";
 
 export const dynamic = "force-dynamic";
 
@@ -8,9 +9,9 @@ export default function SubscriptionsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <div className="subs-page">
       <SubsTabs />
-      {children}
-    </>
+      <SubsSearchProvider>{children}</SubsSearchProvider>
+    </div>
   );
 }

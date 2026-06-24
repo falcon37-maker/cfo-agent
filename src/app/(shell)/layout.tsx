@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/shell/Sidebar";
 import { TopBar } from "@/components/shell/TopBar";
+import { SidebarProvider } from "@/components/shell/SidebarProvider";
 import { ChatWidget } from "@/components/ai/ChatWidget";
 import { ValidationBanner } from "@/components/shell/ValidationBanner";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -18,7 +19,7 @@ export default async function ShellLayout({
   const role = getRole(user?.email);
 
   return (
-    <div className="app">
+    <SidebarProvider>
       <Sidebar
         userEmail={user?.email ?? null}
         userId={user?.id ?? null}
@@ -30,6 +31,6 @@ export default async function ShellLayout({
         <div className="content">{children}</div>
       </div>
       <ChatWidget />
-    </div>
+    </SidebarProvider>
   );
 }

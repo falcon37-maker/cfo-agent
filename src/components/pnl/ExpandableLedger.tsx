@@ -108,6 +108,10 @@ export function ExpandableLedger({
 }: Props) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [cache, setCache] = useState<Record<string, DayDetails>>({});
+  // Pagination for the main daily-ledger rows (client-side view only — pages
+  // through the days already loaded; the totals row stays full).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   // Keep the expand-card's width pinned to the table-wrap viewport size,
   // not the (wider) inner table scroll width. Without this the card
   // gets clipped on the right when the parent table overflows.
@@ -184,7 +188,14 @@ export function ExpandableLedger({
 
   const showStoreColumn = selectedStores.length !== 1;
 
+  const mainTotalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const mainPage = Math.min(page, mainTotalPages);
+  const mainStart = (mainPage - 1) * pageSize;
+  const mainEnd = Math.min(mainStart + pageSize, rows.length);
+  const pagedRows = rows.slice(mainStart, mainEnd);
+
   return (
+    <>
     <div ref={wrapRef} className="table-wrap" style={{ maxHeight: 620 }}>
       <table className="pnl-table">
         <thead>
@@ -204,7 +215,7 @@ export function ExpandableLedger({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => {
+          {pagedRows.map((r) => {
             const roas = r.ad_spend > 0 ? r.total_revenue / r.ad_spend : 0;
             const key = rowKey(r.date);
             const isOpen = !!open[key];
@@ -268,6 +279,63 @@ export function ExpandableLedger({
         </div>
       ) : null}
     </div>
+    {rows.length > 0 ? (
+      <div className="table-foot">
+        <div className="table-foot-left">
+          <span className="table-foot-info">
+            Showing{" "}
+            <strong>
+              {mainStart + 1}–{mainEnd}
+            </strong>{" "}
+            of <strong>{rows.length}</strong>{" "}
+            {rows.length === 1 ? "day" : "days"}
+          </span>
+        </div>
+        <div className="table-foot-right">
+          <label className="table-foot-rpp">
+            <span>Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              aria-label="Rows per page"
+            >
+              {[25, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="table-foot-chip">
+            Page {mainPage} of {mainTotalPages}
+          </span>
+          <div className="pagination-controls" aria-label="Pagination">
+            <button
+              type="button"
+              className="pg-arrow"
+              disabled={mainPage <= 1}
+              onClick={() => setPage(mainPage - 1)}
+              aria-label="Previous page"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <button
+              type="button"
+              className="pg-arrow"
+              disabled={mainPage >= mainTotalPages}
+              onClick={() => setPage(mainPage + 1)}
+              aria-label="Next page"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
 

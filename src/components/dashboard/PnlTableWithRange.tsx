@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BlendedDailyRow } from "@/lib/pnl/queries";
 import { BlendedPnlTable } from "./BlendedPnlTable";
-import { DatePicker } from "@/components/entry/DatePicker";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 
 type Preset = "7d" | "30d" | "90d" | "custom";
 const PRESET_DAYS: Record<Exclude<Preset, "custom">, number> = {
@@ -58,17 +58,15 @@ export function PnlTableWithRange({ pool }: { pool: BlendedDailyRow[] }) {
           Custom
         </button>
       </div>
-      {preset === "custom" ? (
-        <div className="pnl-table-custom">
-          <div style={{ minWidth: 200 }}>
-            <DatePicker value={fromStr} onChange={setFromStr} max={toStr} />
-          </div>
-          <span className="sep">→</span>
-          <div style={{ minWidth: 200 }}>
-            <DatePicker value={toStr} onChange={setToStr} max={defaultTo} />
-          </div>
-        </div>
-      ) : null}
+      <SubsDateRange
+        from={preset === "custom" ? fromStr : defaultFrom}
+        to={preset === "custom" ? toStr : defaultTo}
+        onApply={(f, t) => {
+          setFromStr(f);
+          setToStr(t);
+          setPreset("custom");
+        }}
+      />
     </div>
   );
 

@@ -59,7 +59,11 @@ export type PortalTxn = {
   TransactionType: string; // "Capture" | "Pre-Auth" | "Direct Sale" | "Refund" | "Void"
   Amount: string;
   CustomerId?: string | number;
+  // "Customer" is the display field "<id> - <first> - <last>" (the cohort key
+  // — CustomerId is often absent on the bulk feed, so we parse the id from here).
+  Customer?: string;
   OrderId?: number;
+  IsUpsell?: boolean;
   FailedTransaction?: boolean;
   ResponseMessage?: string;
 };

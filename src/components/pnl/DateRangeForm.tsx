@@ -13,11 +13,18 @@ export function DateRangeForm({
   from,
   to,
   hidden = {},
+  submitLabel = "Apply",
+  submitClassName = "ghost-btn",
 }: {
   action: string;
   from?: string;
   to?: string;
   hidden?: Record<string, string>;
+  /** Text on the submit button. Defaults to "Apply". */
+  submitLabel?: string;
+  /** Button style class. Defaults to "ghost-btn"; pass "primary-btn" for a
+   *  filled accent button. */
+  submitClassName?: string;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const [fromVal, setFromVal] = useState(from ?? addDays(today, -29));
@@ -38,24 +45,22 @@ export function DateRangeForm({
         <input key={k} type="hidden" name={k} value={v} />
       ))}
 
-      <div style={{ minWidth: 210 }}>
-        <DatePicker value={fromVal} onChange={setFromVal} max={toVal} />
+      <div className="date-range-group">
+        <div style={{ minWidth: 210 }}>
+          <DatePicker value={fromVal} onChange={setFromVal} max={toVal} />
+        </div>
+        <input type="hidden" name="from" value={fromVal} />
+
+        <span style={{ color: "var(--muted)", fontSize: 12 }}>→</span>
+
+        <div style={{ minWidth: 210 }}>
+          <DatePicker value={toVal} onChange={setToVal} max={today} />
+        </div>
+        <input type="hidden" name="to" value={toVal} />
       </div>
-      <input type="hidden" name="from" value={fromVal} />
 
-      <span style={{ color: "var(--muted)", fontSize: 12 }}>→</span>
-
-      <div style={{ minWidth: 210 }}>
-        <DatePicker value={toVal} onChange={setToVal} max={today} />
-      </div>
-      <input type="hidden" name="to" value={toVal} />
-
-      <button
-        type="submit"
-        className="ghost-btn"
-        style={{ padding: "6px 12px" }}
-      >
-        Apply
+      <button type="submit" className={submitClassName}>
+        {submitLabel}
       </button>
     </form>
   );

@@ -11,7 +11,8 @@ import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
+import { TableFooter } from "@/components/subscriptions/TableFooter";
 import {
   DollarSign,
   Scissors,
@@ -343,7 +344,34 @@ export default async function SubscriptionsDataCenterPage({
             {selected.length > 0 ? ` · ${selected.join(", ")}` : ""}
           </div>
         </div>
-        <div className="pnl-controls">
+      </div>
+
+      {/* ── Filter rail (stores left · range + date right) ── */}
+      <div className="subs-filterbar" role="group" aria-label="Filters">
+        <div
+          role="group"
+          aria-label="Stores"
+          style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+        >
+          <Link
+            href={chipHrefAll}
+            className={`store-chip ${selected.length === 0 ? "active" : ""}`}
+            prefetch={false}
+          >
+            All
+          </Link>
+          {phxStores.map((id) => (
+            <Link
+              href={buildToggleHref(id)}
+              key={id}
+              className={`store-chip ${selected.includes(id) ? "active" : ""}`}
+              prefetch={false}
+            >
+              {id}
+            </Link>
+          ))}
+        </div>
+        <div className="subs-filterbar-right">
           <div className="seg" role="tablist" aria-label="Range">
             {RANGES.map((r) => (
               <SegLink
@@ -368,31 +396,12 @@ export default async function SubscriptionsDataCenterPage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/subscriptions/data-center"
             from={customFrom ?? from}
             to={customTo ?? to}
             hidden={{ store: activeParam }}
           />
-          <div role="group" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <Link
-              href={chipHrefAll}
-              className={`store-chip ${selected.length === 0 ? "active" : ""}`}
-              prefetch={false}
-            >
-              All
-            </Link>
-            {phxStores.map((id) => (
-              <Link
-                key={id}
-                href={buildToggleHref(id)}
-                className={`store-chip ${selected.includes(id) ? "active" : ""}`}
-                prefetch={false}
-              >
-                {id}
-              </Link>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -513,6 +522,22 @@ export default async function SubscriptionsDataCenterPage({
               </tfoot>
             </table>
           </div>
+          <TableFooter
+            count={feeRows.length}
+            label={rangeLabel}
+            csv={{
+              headers: ["Fee Type", "Amount", "% of Revenue", "Notes"],
+              rows: feeRows.map((r) => [
+                r.label,
+                fmtMoney(r.amount),
+                grossRevenue > 0
+                  ? `${((r.amount / grossRevenue) * 100).toFixed(2)}%`
+                  : "0.00%",
+                r.note,
+              ]),
+              filename: "fee-breakdown",
+            }}
+          />
         </div>
       </section>
 
@@ -566,6 +591,31 @@ export default async function SubscriptionsDataCenterPage({
               </tfoot>
             </table>
           </div>
+          <TableFooter
+            count={perStoreRows.length}
+            label={rangeLabel}
+            csv={{
+              headers: [
+                "Store",
+                "Sub Revenue",
+                "Initial",
+                "Recurring",
+                "Salvage",
+                "Sub Tx",
+                "Avg Tx",
+              ],
+              rows: perStoreRows.map((r) => [
+                r.id,
+                fmtMoney(r.sub),
+                fmtMoney(r.initial),
+                fmtMoney(r.recurring),
+                fmtMoney(r.salvage),
+                fmtInt(r.subCnt),
+                r.aov > 0 ? fmtMoney(r.aov) : "—",
+              ]),
+              filename: "per-store-breakdown",
+            }}
+          />
         </div>
       </section>
 
@@ -606,6 +656,25 @@ export default async function SubscriptionsDataCenterPage({
           <div className="section-sub" style={{ padding: "8px 16px", fontSize: 11 }}>
             Approval % comes from the latest PHX snapshot, not per-day data.
           </div>
+          <TableFooter
+            count={txTypeRows.length}
+            label={rangeLabel}
+            csv={{
+              headers: ["Type", "Count", "Revenue", "Avg Amount", "Approval %"],
+              rows: txTypeRows.map((r) => {
+                const avg = r.count > 0 ? r.revenue / r.count : 0;
+                const ap = approvalPct[r.label];
+                return [
+                  r.label,
+                  fmtInt(r.count),
+                  r.revenue > 0 ? fmtMoney(r.revenue) : "—",
+                  avg > 0 ? fmtMoney(avg) : "—",
+                  ap != null ? `${ap.toFixed(1)}%` : "—",
+                ];
+              }),
+              filename: "transaction-type-breakdown",
+            }}
+          />
         </div>
       </section>
 

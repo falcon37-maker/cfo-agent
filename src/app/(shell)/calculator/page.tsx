@@ -112,7 +112,7 @@ export default function CalculatorPage() {
         }}
       >
         {/* ─── Inputs ─── */}
-        <div className="card" style={{ padding: 20 }}>
+        <div className="card" style={{ padding: 20, borderRadius: 12 }}>
           <div
             style={{
               fontSize: 11,
@@ -218,7 +218,7 @@ export default function CalculatorPage() {
           </div>
 
           {/* 3/6/12 comparison table */}
-          <div className="card table-card">
+          <div className="card table-card" style={{ borderRadius: 12 }}>
             <div className="card-head">
               <div>
                 <div className="card-title">LTV &amp; profit per customer</div>

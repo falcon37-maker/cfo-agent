@@ -42,6 +42,7 @@ export function CogsForm({
         key={`cogs-${parsed}`}
         action={submitCogsAction}
         className="card entry-card"
+        style={{ borderRadius: 12 }}
       >
         <input type="hidden" name="store" value={store} />
         <input type="hidden" name="date" value={date} />

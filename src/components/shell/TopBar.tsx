@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { SidebarToggle } from "./SidebarProvider";
 
 const TITLES: Record<string, { title: string; crumb: string; sub?: string }> = {
   "/": { title: "Dashboard", crumb: "Dashboard" },
@@ -31,6 +32,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="topbar-left">
+        <SidebarToggle />
         <div className="crumbs">
           <span>Workspace</span>
           <span className="sep">/</span>

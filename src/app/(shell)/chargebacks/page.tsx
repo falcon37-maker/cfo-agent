@@ -3,7 +3,7 @@ import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtMoney, fmtInt } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import { ChargebacksTimelineChart } from "@/components/chargebacks/TimelineChart";
 import { ShieldAlert, Trophy, Gauge, Coins } from "lucide-react";
 
@@ -216,7 +216,7 @@ export default async function ChargebacksPage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/chargebacks"
             from={customFrom ?? from}
             to={customTo ?? to}
@@ -297,7 +297,7 @@ export default async function ChargebacksPage({
       {alerts.length > 0 ? (
         <section>
           <div className="section-eyebrow">Recent alerts</div>
-          <div className="card table-card">
+          <div className="card table-card pnl-ledger-themed" style={{ borderRadius: 12 }}>
             <div className="table-wrap">
               <table className="pnl-table">
                 <thead>

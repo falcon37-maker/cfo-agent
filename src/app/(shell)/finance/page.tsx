@@ -10,7 +10,7 @@ import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import { FinanceMonthlyTrend } from "@/components/finance/MonthlyTrend";
 import {
   DollarSign,
@@ -332,7 +332,7 @@ export default async function FinancePage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/finance"
             from={customFrom ?? from}
             to={customTo ?? to}
@@ -438,7 +438,7 @@ export default async function FinancePage({
       {/* ── Fee breakdown ── */}
       <section>
         <div className="section-eyebrow">Fee breakdown</div>
-        <div className="card table-card">
+        <div className="card table-card pnl-ledger-themed" style={{ borderRadius: 12 }}>
           <div className="table-wrap">
             <table className="pnl-table">
               <thead>
@@ -489,7 +489,7 @@ export default async function FinancePage({
       {/* ── Revenue by source ── */}
       <section>
         <div className="section-eyebrow">Revenue by source</div>
-        <div className="card table-card">
+        <div className="card table-card pnl-ledger-themed" style={{ borderRadius: 12 }}>
           <div className="table-wrap">
             <table className="pnl-table">
               <thead>

@@ -37,6 +37,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# playwright MCP scratch (screenshots, console logs, snapshots)
+.playwright-mcp/
+
+# local MCP server config (per-developer, not committed)
+.mcp.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

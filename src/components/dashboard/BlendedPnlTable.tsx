@@ -1,11 +1,19 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { BlendedDailyRow } from "@/lib/pnl/queries";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
+import { TableFooter } from "@/components/subscriptions/TableFooter";
+import { ExportCsvButton } from "@/components/subscriptions/ExportCsvButton";
+import { useSubsSearch } from "@/components/subscriptions/SubsTableSearch";
 
 // Processing-fee rates (client spec Jun 2026):
 //   drop-ship Shopify stores  → 3.9% of their store revenue
 //   subscription (PHX) stores → 16.3% of their total (checkout + subs billed)
 const DROPSHIP_FEE_RATE = 0.039;
 const SUBS_FEE_RATE = 0.163;
+const PAGE_SIZES = [10, 25, 50, 100];
 
 type Props = {
   rows: BlendedDailyRow[];
@@ -19,6 +27,17 @@ type Props = {
    *             Dashboard, which blends both store types). */
   feesMode?: "total" | "split";
   feeRate?: number;
+  /** When set, renders a Transactions-style footer bar (row count + range
+   *  label + Export to CSV + page indicator) below the table. Omit to keep
+   *  the bare table (e.g. on the dashboard). */
+  csvFilename?: string;
+  /** Context label shown in the footer, e.g. the active range. */
+  footerLabel?: string;
+  /** Turn on the Transactions-style interactive toolbar: a per-table search
+   *  box + rows-per-page selector + numbered pagination. Purely front-end —
+   *  it filters/pages only the rows already passed in; no data is re-fetched.
+   *  Off by default so the dashboard table stays static. */
+  searchable?: boolean;
 };
 
 /** Per-row processing fee. In "split" mode the drop-ship (non-PHX) Shopify
@@ -32,6 +51,12 @@ function rowFee(r: BlendedDailyRow, mode: "total" | "split", rate: number): numb
   return r.total_revenue * rate;
 }
 
+/** Front-end revenue for a row (PHX Direct+Initial + non-PHX Shopify + upsell).
+ *  Kept here so both the cell and the search/CSV helpers agree. */
+function frontendRevenue(r: BlendedDailyRow): number {
+  return r.phx_frontend_revenue + r.shopify_revenue + r.phx_upsell_revenue;
+}
+
 /**
  * Blended daily P&L — Shopify front-end + PHX recurring side-by-side,
  * with a Total column, Net Profit pill, and a totals + averages footer.
@@ -42,12 +67,18 @@ export function BlendedPnlTable({
   showFees = false,
   feesMode = "total",
   feeRate = 0,
+  csvFilename,
+  footerLabel,
+  searchable = false,
 }: Props) {
   // Total fees = sum of each row's fee (handles the split rates correctly).
   const totalFees = rows.reduce((s, r) => s + rowFee(r, feesMode, feeRate), 0);
   // Show newest day first (day-wise descending) regardless of how the data
   // layer ordered the array. Totals are order-independent (a sum).
-  const sortedRows = [...rows].sort((a, b) => b.date.localeCompare(a.date));
+  const sortedRows = useMemo(
+    () => [...rows].sort((a, b) => b.date.localeCompare(a.date)),
+    [rows],
+  );
   const totals = rows.reduce(
     (acc, r) => {
       acc.orders += r.shopify_orders;
@@ -87,6 +118,94 @@ export function BlendedPnlTable({
   // Show MANUAL REV column only when this tenant has logged any. Keeps the
   // table tight for ecom-only users.
   const showManual = totals.manual_rev > 0;
+  const colSpan = 10 + (showManual ? 1 : 0) + (showFees ? 1 : 0);
+
+  // ── Interactive view state (only used when `searchable`) ──────────────
+  // The query is shared via context so the search box can live up in the
+  // page filter bar while this table consumes it. Safe on the dashboard
+  // (no provider → query is always "").
+  const { query } = useSubsSearch();
+  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
+  // Reset to the first page whenever the search query changes. Done during
+  // render with a previous-value guard (the React-recommended alternative to
+  // a setState-in-effect) so it stays in sync without cascading renders.
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
+    setPage(1);
+  }
+
+  // Filter the already-rendered rows by a free-text match over their visible
+  // values. No data is re-fetched — this is a pure front-end convenience.
+  const filtered = useMemo(() => {
+    if (!searchable || !query.trim()) return sortedRows;
+    const q = query.toLowerCase();
+    return sortedRows.filter((r) => {
+      const hay = [
+        fmtDate(r.date),
+        r.shopify_orders,
+        r.phx_subs_billed,
+        fmtMoney(frontendRevenue(r)),
+        fmtMoney(r.phx_subs_revenue),
+        fmtMoney(r.total_revenue),
+        fmtMoney(r.shopify_cogs),
+        fmtMoney(r.shopify_ad_spend),
+        fmtMoney(r.total_net_profit),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [searchable, query, sortedRows]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const sliceStart = (safePage - 1) * pageSize;
+  const displayRows = searchable
+    ? filtered.slice(sliceStart, sliceStart + pageSize)
+    : sortedRows;
+  const showingFrom = filtered.length === 0 ? 0 : sliceStart + 1;
+  const showingTo = Math.min(sliceStart + pageSize, filtered.length);
+
+  // CSV mirrors the visible table columns; exports the current filter result.
+  const csvHeaders = [
+    "Date",
+    "Shopify Orders",
+    "Subs Billed",
+    "Shopify Revenue",
+    "Subscription Billed",
+    ...(showManual ? ["Manual Rev"] : []),
+    "Total",
+    "COGS",
+    ...(showFees ? ["Fees"] : []),
+    "Ad Spend",
+    "ROAS",
+    "Net Profit",
+  ];
+  const toCsvRow = (r: BlendedDailyRow): Array<string | number> => {
+    const roas =
+      r.shopify_ad_spend > 0 ? r.total_revenue / r.shopify_ad_spend : 0;
+    return [
+      fmtDate(r.date),
+      fmtInt(r.shopify_orders),
+      r.phx_subs_billed > 0 ? fmtInt(r.phx_subs_billed) : "—",
+      frontendRevenue(r) > 0 ? fmtMoney(frontendRevenue(r)) : "—",
+      r.phx_subs_revenue > 0 ? fmtMoney(r.phx_subs_revenue) : "—",
+      ...(showManual
+        ? [r.manual_revenue > 0 ? fmtMoney(r.manual_revenue) : "—"]
+        : []),
+      fmtMoney(r.total_revenue),
+      fmtMoney(r.shopify_cogs),
+      ...(showFees
+        ? [r.total_revenue > 0 ? fmtMoney(rowFee(r, feesMode, feeRate)) : "—"]
+        : []),
+      fmtMoney(r.shopify_ad_spend),
+      r.shopify_ad_spend > 0 ? `${roas.toFixed(2)}x` : "—",
+      fmtMoney(r.total_net_profit),
+    ];
+  };
+  const csvRows = (searchable ? filtered : sortedRows).map(toCsvRow);
 
   return (
     <div className="card table-card">
@@ -102,8 +221,9 @@ export function BlendedPnlTable({
           <div className="card-actions">{rangeControl}</div>
         ) : null}
       </div>
+
         <div className="table-wrap">
-          <table className="pnl-table">
+          <table className={`pnl-table${searchable ? " pnl-table-wide" : ""}`}>
             <thead>
               <tr>
                 <th>Date</th>
@@ -122,7 +242,7 @@ export function BlendedPnlTable({
               </tr>
             </thead>
             <tbody>
-              {sortedRows.map((r) => {
+              {displayRows.map((r) => {
                 const roas =
                   r.shopify_ad_spend > 0 ? r.total_revenue / r.shopify_ad_spend : 0;
                 const strongRoas = roas >= 3.0;
@@ -130,10 +250,7 @@ export function BlendedPnlTable({
                 // Frontend Rev = PHX Direct + Initial (Vip Initial), plus
                 // any non-PHX store's Shopify revenue, plus PHX upsell — keeps
                 // TOTAL = FRONTEND + SUBS exact.
-                const frontendRev =
-                  r.phx_frontend_revenue +
-                  r.shopify_revenue +
-                  r.phx_upsell_revenue;
+                const frontendRev = frontendRevenue(r);
                 return (
                   <tr key={r.date}>
                     <td>{fmtDate(r.date)}</td>
@@ -187,12 +304,27 @@ export function BlendedPnlTable({
                     </td>
                     <td className={`num profit ${profitable ? "pos" : "neg"}`}>
                       <span className="profit-pill">
+                        {searchable ? <span className="pill-dot" /> : null}
                         {fmtMoney(r.total_net_profit)}
                       </span>
                     </td>
                   </tr>
                 );
               })}
+              {searchable && displayRows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={colSpan}
+                    style={{
+                      textAlign: "center",
+                      padding: 28,
+                      color: "var(--muted)",
+                    }}
+                  >
+                    No rows match “{query}”.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
             <tfoot>
               <tr className="tfoot-row">
@@ -243,6 +375,83 @@ export function BlendedPnlTable({
           </tfoot>
         </table>
       </div>
+
+      {searchable ? (
+        <div className="table-foot">
+          <div className="table-foot-left">
+            <span className="table-foot-info">
+              Currently showing{" "}
+              <strong>
+                {showingFrom}–{showingTo}
+              </strong>{" "}
+              of <strong>{filtered.length}</strong>{" "}
+              {filtered.length === 1 ? "row" : "rows"}
+              {footerLabel ? (
+                <span className="table-foot-ctx"> · {footerLabel}</span>
+              ) : null}
+            </span>
+            <ExportCsvButton
+              headers={csvHeaders}
+              rows={csvRows}
+              filename={csvFilename ?? "daily-pnl"}
+            />
+          </div>
+
+          <div className="table-foot-right">
+            <label className="table-foot-rpp">
+              <span>Rows per page</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                aria-label="Rows per page"
+              >
+                {PAGE_SIZES.map((n) => (
+                  <option key={n} value={n}>
+                    {n} / page
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <span className="table-foot-chip">
+              Page {safePage} of {totalPages}
+            </span>
+            <div className="pagination-controls" aria-label="Pagination">
+              <button
+                type="button"
+                className="pg-arrow"
+                disabled={safePage <= 1}
+                onClick={() => setPage(safePage - 1)}
+                aria-label="Previous page"
+              >
+                <ChevronLeft size={14} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                className="pg-arrow"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage(safePage + 1)}
+                aria-label="Next page"
+              >
+                <ChevronRight size={14} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : csvFilename ? (
+        <TableFooter
+          count={sortedRows.length}
+          label={footerLabel}
+          csv={{
+            headers: csvHeaders,
+            rows: csvRows,
+            filename: csvFilename,
+          }}
+        />
+      ) : null}
     </div>
   );
 }

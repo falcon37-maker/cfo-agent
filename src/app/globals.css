@@ -715,20 +715,26 @@ kbd {
 .kpi-row.kpi-5 {
   grid-template-columns: repeat(5, 1fr);
 }
+.kpi-row.kpi-6 {
+  grid-template-columns: repeat(6, 1fr);
+}
 @media (max-width: 1400px) {
-  .kpi-row.kpi-5 {
+  .kpi-row.kpi-5,
+  .kpi-row.kpi-6 {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 @media (max-width: 1180px) {
   .kpi-row,
-  .kpi-row.kpi-5 {
+  .kpi-row.kpi-5,
+  .kpi-row.kpi-6 {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 @media (max-width: 620px) {
   .kpi-row,
-  .kpi-row.kpi-5 {
+  .kpi-row.kpi-5,
+  .kpi-row.kpi-6 {
     grid-template-columns: 1fr;
   }
 }
@@ -748,7 +754,7 @@ kbd {
 .kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px; /* Paysight-match (8px radius) */
   padding: 14px 14px 12px;
   position: relative;
   overflow: hidden;
@@ -798,20 +804,21 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px 2px 5px;
-  border-radius: 5px;
-  font-size: 11.5px;
-  font-weight: 550;
+  padding: 2px 10px; /* Paysight-match pill */
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+/* Paysight-style solid badges: green pill for positive, red for negative. */
 .kpi-delta.pos {
-  background: var(--accent-bg);
-  color: var(--accent);
+  background: var(--positive);
+  color: #fff;
 }
 .kpi-delta.neg {
-  background: var(--negative-bg);
-  color: var(--negative);
+  background: var(--negative);
+  color: #fff;
 }
 .kpi-delta-label {
   font-size: 11px;
@@ -1035,6 +1042,59 @@ kbd {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
+}
+/* ── Stores ledger themed to match the Subscriptions tables: column dividers,
+ *    zebra striping, denser rows with extra horizontal column spacing, and a
+ *    horizontal scrollbar at the bottom of the table. ── */
+.pnl-ledger-themed .pnl-table {
+  font-size: 12px;
+}
+.pnl-ledger-themed .pnl-table th {
+  padding: 11px 18px; /* header — moderate height */
+}
+.pnl-ledger-themed .pnl-table td {
+  padding: 14px 18px; /* taller, roomier cells like the paysight table */
+}
+.pnl-ledger-themed .pnl-table th {
+  font-size: 10px;
+}
+.pnl-ledger-themed .pnl-table th:not(:last-child),
+.pnl-ledger-themed .pnl-table td:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+.pnl-ledger-themed .pnl-table tbody tr:nth-child(odd) {
+  background: var(--surface-2);
+}
+/* Keep the expand detail row + its parent clean (not striped). */
+.pnl-ledger-themed .pnl-table tbody tr.day-detail-row,
+.pnl-ledger-themed .pnl-table tbody tr.row-open {
+  background: var(--surface);
+}
+.pnl-ledger-themed .pnl-table tbody tr:not(.day-detail-row):hover {
+  background: var(--surface-3);
+}
+/* Horizontal scrollbar pinned to the bottom of the table area. */
+.pnl-ledger-themed .table-wrap {
+  overflow-x: auto;
+}
+/* When the theme is applied via a wrapper (Dashboard), round the card too. */
+.pnl-ledger-themed > .card.table-card {
+  border-radius: 12px;
+}
+
+/* 5-tile variant — fills the row (no empty trailing column). */
+.pnl-totals.pnl-totals-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+@media (max-width: 1180px) {
+  .pnl-totals.pnl-totals-5 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (max-width: 620px) {
+  .pnl-totals.pnl-totals-5 {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .total-label {
   font-size: 10.5px;
@@ -3644,3 +3704,1049 @@ kbd {
   display: flex; justify-content: flex-end; gap: 10px;
   padding: 14px 20px; border-top: 1px solid var(--border);
 }
+
+/* ═══ Subscriptions date-range picker (dual-month, paysight-style) ═══ */
+.dr-wrap {
+  position: relative;
+}
+.dr-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.dr-trigger:hover {
+  border-color: var(--border-strong);
+}
+.dr-trigger.open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.dr-trigger > svg:first-child {
+  color: var(--muted-strong);
+}
+.dr-trigger.open > svg:first-child {
+  color: var(--accent);
+}
+.dr-value {
+  font-weight: 500;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dr-arrow {
+  color: var(--muted);
+  margin: 0 2px;
+}
+.dr-maxhint {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: var(--surface-3);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.dr-chev {
+  color: var(--muted);
+  transition: transform 160ms;
+}
+.dr-trigger.open .dr-chev {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+.dr-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 40;
+  box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.55);
+  width: max-content;
+}
+.dr-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dr-presets-top {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.dr-presets-bottom {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+.dr-preset {
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.dr-preset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.dr-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 2px;
+}
+.dr-nav {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.dr-nav:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.dr-months {
+  display: flex;
+  gap: 20px;
+}
+.dr-month {
+  width: 230px;
+}
+.dr-month-label {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.dr-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+.dr-dow > div {
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.dr-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.dr-cell {
+  height: 30px;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background 100ms, color 100ms;
+}
+.dr-cell:hover:not(.disabled):not(.muted) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.dr-cell.muted {
+  color: var(--muted);
+  opacity: 0.5;
+}
+.dr-cell.today {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.dr-cell.in-range {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-radius: 0;
+}
+.dr-cell.start,
+.dr-cell.end {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.dr-cell.start {
+  border-radius: 7px 0 0 7px;
+}
+.dr-cell.end {
+  border-radius: 0 7px 7px 0;
+}
+.dr-cell.start.end {
+  border-radius: 7px;
+}
+.dr-cell.disabled {
+  color: var(--muted);
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.dr-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.dr-reset {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 550;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.dr-reset:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.dr-apply {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 7px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.dr-apply:hover {
+  background: var(--accent-strong);
+}
+@media (max-width: 620px) {
+  .dr-months {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .dr-pop {
+    right: auto;
+    left: 0;
+    max-width: calc(100vw - 32px);
+    overflow-x: auto;
+  }
+}
+
+/* ═══ Subscriptions — filter bar + table footer (Transactions-v2 style) ═══ */
+/* The Subscriptions content is wrapped in .subs-page so the table styling
+ * below can be scoped to it. Re-create the .content flex rhythm the wrapper
+ * would otherwise swallow (sections used to be direct flex children). */
+.subs-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Tables on the Subscriptions pages mirror the Paysight transactions table:
+ * compact rows, subtle zebra striping, and a crisp indigo hover. Scoped to
+ * .subs-page so the dashboard's identical tables keep their own rhythm. */
+.subs-page .pnl-table {
+  font-size: 12px;
+}
+.subs-page .pnl-table th {
+  padding: 11px 18px; /* header — moderate height */
+}
+.subs-page .pnl-table td {
+  padding: 14px 18px; /* taller, roomier cells like the paysight table */
+}
+/* Horizontal scrollbar pinned to the bottom of each Subscriptions table. */
+.subs-page .table-card .table-wrap {
+  overflow-x: auto;
+}
+/* Wide ledger (many columns) — keep a roomy min-width so columns stay spaced
+ * and the table scrolls horizontally like the paysight transactions table,
+ * instead of squishing to fit. */
+.subs-page .pnl-table-wide {
+  /* Wider than the content area (~1536px max) so columns stay generously
+   * spaced and the table always shows a bottom horizontal scrollbar, like
+   * the paysight transactions table. */
+  min-width: 1640px;
+}
+/* Give each column a comfortable minimum so the spacing reads evenly. */
+.subs-page .pnl-table-wide th,
+.subs-page .pnl-table-wide td {
+  min-width: 120px;
+}
+.subs-page .pnl-table-wide th:first-child,
+.subs-page .pnl-table-wide td:first-child {
+  min-width: 96px;
+}
+/* Freeze the Date column while scrolling horizontally (paysight-style) so the
+ * row label stays in view. Each sticky cell carries its own background so the
+ * scrolled-under cells don't show through, and a hairline + soft shadow lifts
+ * the frozen column. */
+.subs-page .pnl-table-wide thead th:first-child,
+.subs-page .pnl-table-wide tbody td:first-child,
+.subs-page .pnl-table-wide tfoot td:first-child {
+  position: sticky;
+  left: 0;
+  box-shadow: 1px 0 0 var(--border), 4px 0 8px -6px rgba(0, 0, 0, 0.35);
+}
+.subs-page .pnl-table-wide thead th:first-child {
+  z-index: 3;
+}
+.subs-page .pnl-table-wide tfoot td:first-child {
+  z-index: 2;
+}
+.subs-page .pnl-table-wide tbody td:first-child {
+  z-index: 1;
+  background: var(--surface);
+}
+.subs-page .pnl-table-wide tbody tr:nth-child(odd) td:first-child {
+  background: var(--surface-2);
+}
+.subs-page .pnl-table-wide tbody tr:hover td:first-child {
+  background: var(--surface-3);
+}
+
+/* Crisper header divider on the Subscriptions tables. */
+.subs-page .pnl-table thead th {
+  border-bottom: 1px solid var(--border-strong);
+}
+.subs-page .pnl-table th {
+  font-size: 10px;
+}
+.subs-page .pnl-table td:first-child {
+  font-size: 11px;
+}
+/* Vertical column dividers — a clean grid like the reference table. */
+.subs-page .pnl-table th:not(:last-child),
+.subs-page .pnl-table td:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+.subs-page .pnl-table tbody tr:nth-child(odd) {
+  background: var(--surface-2);
+}
+.subs-page .pnl-table tbody tr:hover {
+  background: var(--surface-3);
+}
+.subs-page .pnl-table tbody tr:hover td:first-child {
+  /* Keep the Date text fully readable on the accent-tinted hover row
+   * (accent-on-accent-bg was too low-contrast). */
+  color: var(--text);
+}
+
+/* ── Compact theme — tighten headings, cards, and form/footer controls to
+ *    the reference's dense scale. All scoped to .subs-page. ── */
+.subs-page .section-title {
+  font-size: 18px;
+}
+.subs-page .section-sub {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.subs-page .section-eyebrow {
+  font-size: 10px;
+}
+.subs-page .card-title {
+  font-size: 13px;
+}
+.subs-page .card-sub {
+  font-size: 11px;
+}
+.subs-page .card-head {
+  padding: 13px 16px;
+}
+
+/* KPI cards — denser */
+.subs-page .kpi-card {
+  padding: 12px 12px 10px;
+  border-radius: 10px;
+}
+.subs-page .kpi-head {
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.subs-page .kpi-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+.subs-page .kpi-value {
+  font-size: 19px;
+}
+.subs-page .kpi-footer {
+  margin-top: 8px;
+}
+.subs-page .kpi-delta-label {
+  font-size: 10.5px;
+}
+
+/* Footer + total-tile text */
+.subs-page .table-foot {
+  padding: 9px 14px;
+}
+.subs-page .table-foot-info {
+  font-size: 11.5px;
+}
+.subs-page .total-tile {
+  padding: 10px 12px;
+}
+.subs-page .total-value {
+  font-size: 16px;
+}
+
+/* Footer form controls — slim to match the compact rail. */
+.subs-page .table-foot .pg-num,
+.subs-page .table-foot .pg-arrow {
+  min-width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+.subs-page .table-foot-rpp select {
+  padding: 4px 24px 4px 9px;
+}
+.subs-page .table-foot-export {
+  padding: 4px 9px;
+}
+
+
+/* A full-width grouped filter rail under the page heading. Scoped to
+ * .subs-filterbar so the shared .pnl-controls layout on other pages is
+ * untouched. */
+.subs-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 7px 9px;
+  flex-wrap: wrap;
+  width: 100%;
+  /* Bar container removed — controls (search · stores · range · date) sit
+   * inline with no surrounding box. */
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+.subs-filterbar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-right: 9px;
+  margin-right: 1px;
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.subs-filterbar-label svg {
+  color: var(--muted-strong);
+}
+/* Push the trailing group (store chips) to the right edge of the rail. */
+.subs-filterbar-spacer {
+  margin-left: auto;
+}
+@media (max-width: 860px) {
+  .subs-filterbar-label {
+    border-right: 0;
+    padding-right: 0;
+    width: 100%;
+  }
+  .subs-filterbar-spacer {
+    margin-left: 0;
+  }
+}
+
+/* Normalize every control in the rail to one height (~36px) so the date
+ * pickers, range segmented control, store chips, and the "Apply Filters"
+ * primary button line up — the clean single-row form look from the
+ * Transactions-v2 reference. All scoped to .subs-filterbar. */
+.subs-filterbar .dp-trigger {
+  width: auto;
+  padding: 6px 9px;
+  font-size: 12px;
+  border-radius: 7px;
+  gap: 6px;
+}
+.subs-filterbar .dp-trigger > svg:first-child {
+  width: 13px;
+  height: 13px;
+}
+.subs-filterbar form {
+  gap: 6px;
+}
+/* Right-hand group: range segmented control + date range + Apply Filters,
+ * pushed to the right edge. Search box + store chips stay on the left. */
+.subs-filterbar-right {
+  display: flex;
+  align-items: center;
+  gap: 7px 9px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+/* Compact the search box so it matches the rail's control height. */
+.subs-filterbar .table-search {
+  min-width: 220px;
+  padding: 6px 10px;
+  border-radius: 7px;
+}
+.subs-filterbar .table-search input {
+  font-size: 12px;
+}
+@media (max-width: 860px) {
+  .subs-filterbar-right {
+    margin-left: 0;
+  }
+  .subs-filterbar .table-search {
+    flex: 1 1 100%;
+  }
+}
+.subs-filterbar .seg {
+  padding: 2px;
+  align-self: stretch;
+  align-items: stretch;
+}
+.subs-filterbar .seg a,
+.subs-filterbar .seg button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.subs-filterbar .store-chip {
+  padding: 6px 11px;
+  border-radius: 7px;
+  font-size: 10.5px;
+}
+.subs-filterbar .primary-btn {
+  padding: 6px 13px;
+  font-size: 11.5px;
+}
+/* Default date-range group — neutral wrapper, so every page that uses
+ * DateRangeForm keeps its original two-box look. */
+.date-range-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Subscriptions: render the date range as ONE unified pill (calendar + from →
+ * to inside a single bordered box), matching the reference's date filter. The
+ * inner date triggers go borderless; the group carries the box + focus ring. */
+.subs-filterbar .date-range-group {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 1px 8px;
+  gap: 2px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.subs-filterbar .date-range-group:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.subs-filterbar .date-range-group > div {
+  min-width: 0 !important;
+}
+.subs-filterbar .date-range-group .dp-trigger {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 5px 4px;
+}
+.subs-filterbar .date-range-group .dp-trigger:hover {
+  background: transparent;
+  border-color: transparent;
+}
+.subs-filterbar .date-range-group .dp-trigger.open {
+  border-color: transparent;
+  box-shadow: none;
+}
+/* The second date keeps the dropdown caret but drops its leading calendar
+ * icon, so the pill reads "📅 from → to" with one calendar like the reference. */
+.subs-filterbar .date-range-group > div:last-of-type .dp-trigger > svg:first-child {
+  display: none;
+}
+.subs-filterbar .date-range-group > span {
+  font-size: 11px !important;
+  color: var(--muted);
+}
+@media (max-width: 620px) {
+  .subs-filterbar form {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .subs-filterbar .date-range-group {
+    flex: 1 1 100%;
+  }
+  .subs-filterbar .primary-btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/* Table footer bar — count + range label + Export on the left, a static
+ * single-page indicator on the right (reuses the .pg-* pagination styles
+ * for visual consistency with the orders pagination). */
+.table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+.table-foot-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.table-foot-info {
+  font-size: 12px;
+  color: var(--muted-strong);
+  font-variant-numeric: tabular-nums;
+  /* Bordered pill chip, like the paysight footer's "Showing…" box. */
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.table-foot-info strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.table-foot-ctx {
+  color: var(--muted);
+}
+.table-foot-export {
+  padding: 6px 11px;
+  font-size: 11.5px;
+  border-radius: 8px;
+}
+.table-foot-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* "Page N of M" pill, like the paysight footer's PAGE chip. */
+.table-foot-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.table-foot-rpp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-strong);
+}
+.table-foot-rpp > span {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.table-foot-rpp select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 26px 6px 11px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7079' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 12px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.table-foot-rpp select:hover {
+  border-color: var(--border-strong);
+}
+.table-foot-rpp select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.table-foot .pg-num,
+.table-foot .pg-arrow {
+  min-width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+/* Search toolbar row — a dedicated strip above the table holding a wide,
+ * left-aligned search box, mirroring the reference's "Search data in current
+ * page" bar. */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.table-toolbar .table-search {
+  flex: 1;
+  max-width: 440px;
+}
+
+/* In-table search box. */
+.table-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 240px;
+  transition: border-color 120ms, box-shadow 120ms, background 120ms;
+}
+.table-search:focus-within {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+.table-search svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.table-search:focus-within svg {
+  color: var(--accent);
+}
+.table-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.table-search input::placeholder {
+  color: var(--muted);
+}
+.table-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--muted-strong);
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.table-search-clear:hover {
+  background: var(--border-strong);
+  color: var(--text);
+}
+
+/* Status-style profit pill (Subscriptions Daily P&L) — a leading tone dot
+ * makes the Net Profit pill read like the reference's "● ORDER" status
+ * pills. The dot colour follows the pos/neg state set on the cell. */
+.pnl-table td.profit .profit-pill .pill-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.pnl-table td.profit.pos .profit-pill .pill-dot {
+  background: var(--positive);
+}
+.pnl-table td.profit.neg .profit-pill .pill-dot {
+  background: var(--negative);
+}
+@media (max-width: 620px) {
+  .table-search {
+    min-width: 0;
+    width: 100%;
+  }
+  .card-head .card-actions {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 620px) {
+  .table-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .table-foot .pagination-controls {
+    justify-content: flex-end;
+  }
+}
+
+/* ── Rounder Subscriptions form controls (10px) + table card (12px) per
+ *    request. Placed last so it wins over the earlier radius values. ── */
+.subs-filterbar .table-search,
+.subs-filterbar .store-chip,
+.subs-filterbar .seg,
+.subs-filterbar .dr-trigger,
+.dr-reset,
+.dr-apply,
+.subs-page .table-foot-rpp select,
+.subs-page .table-foot-export {
+  border-radius: 10px;
+}
+.subs-filterbar .seg a,
+.subs-filterbar .seg button {
+  border-radius: 8px;
+}
+.subs-page .table-foot .pg-num,
+.subs-page .table-foot .pg-arrow {
+  border-radius: 9px;
+}
+.subs-page .card.table-card {
+  border-radius: 12px;
+}
+
+/* ═══ Collapsible sidebar (icon rail, paysight-style top-nav toggle) ═══ */
+.app {
+  transition: grid-template-columns 160ms ease;
+}
+.app.sidebar-collapsed {
+  grid-template-columns: 64px 1fr;
+}
+.sidebar-collapsed .sidebar {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+/* Hide all labels/text — leave the icons only. */
+.sidebar-collapsed .logo-title,
+.sidebar-collapsed .logo-sub,
+.sidebar-collapsed .sidebar-search span,
+.sidebar-collapsed .sidebar-search kbd,
+.sidebar-collapsed .sidebar-section-label,
+.sidebar-collapsed .nav-item span,
+.sidebar-collapsed .nav-badge,
+.sidebar-collapsed .agent-card > div:not(.agent-pulse),
+.sidebar-collapsed .user-info,
+.sidebar-collapsed .user-row form {
+  display: none;
+}
+/* Center the icon-only items. */
+.sidebar-collapsed .sidebar-logo {
+  justify-content: center;
+  padding: 4px 0 10px;
+}
+.sidebar-collapsed .sidebar-search {
+  justify-content: center;
+  padding: 9px 0;
+}
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+}
+.sidebar-collapsed .agent-card {
+  justify-content: center;
+  padding: 10px 0;
+}
+.sidebar-collapsed .user-row {
+  justify-content: center;
+  padding: 8px 0;
+}
+/* Top-bar toggle button sits just before the breadcrumb. */
+.sidebar-toggle {
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+/* Table headers matched to the paysight header: title-case (not uppercase),
+ * a bit larger, medium-gray text. Applied to every themed table. */
+.subs-page .pnl-table thead th,
+.pnl-ledger-themed .pnl-table thead th {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--muted-strong);
+}
+
+/* ── Churn page ───────────────────────────────────────────────────────── */
+.churn-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.churn-filter.seg {
+  display: inline-flex;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+}
+.churn-filter.seg a {
+  padding: 5px 13px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--muted);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.churn-filter.seg a:hover { color: var(--text); }
+.churn-filter.seg a.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* KPI cards — responsive grid, no stacking */
+.churn-cards {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+@media (max-width: 1280px) { .churn-cards { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px)  { .churn-cards { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 460px)  { .churn-cards { grid-template-columns: 1fr; } }
+
+.churn-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.churn-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--border);
+}
+.churn-card[data-tone="danger"]::before { background: #ef4444; }
+.churn-card[data-tone="good"]::before   { background: #16a34a; }
+.churn-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.churn-card-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.churn-card-icon {
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  color: var(--muted-strong);
+}
+.churn-card-value {
+  font-size: 28px;
+  font-weight: 680;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.churn-card[data-tone="danger"] .churn-card-value { color: #ef4444; }
+.churn-card[data-tone="good"]   .churn-card-value { color: #16a34a; }
+.churn-card-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.churn-section { padding: 20px; margin-top: 18px; }
+.churn-section-head { margin-bottom: 16px; }
+
+/* Headline flow (M1 → M2 → split) */
+.churn-flow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.churn-flow-stat {
+  flex: 1;
+  min-width: 130px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.04));
+}
+.churn-flow-stat.small { padding: 11px 14px; min-width: 100px; }
+.churn-flow-value {
+  font-size: 26px;
+  font-weight: 680;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.churn-flow-stat.small .churn-flow-value { font-size: 19px; }
+.churn-flow-value[data-tone="pos"] { color: #16a34a; }
+.churn-flow-value[data-tone="neg"] { color: #ef4444; }
+.churn-flow-label {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.churn-flow-arrow {
+  font-size: 20px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.churn-flow-split {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cohort-table th,
+.cohort-table td { white-space: nowrap; }
+.cohort-table td.num { font-variant-numeric: tabular-nums; }

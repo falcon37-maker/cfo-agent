@@ -15,6 +15,7 @@ import {
   ShieldAlert,
   Landmark,
   DollarSign,
+  TrendingDown,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
 import type { Role } from "@/lib/auth/roles";
@@ -38,6 +39,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
       { href: "/pnl", label: "Stores", icon: LineChart },
       { href: "/subscriptions", label: "Subscriptions", icon: Repeat },
+      { href: "/churn", label: "Churn", icon: TrendingDown },
       { href: "/finance", label: "Finance", icon: Landmark },
       { href: "/chargebacks", label: "Chargebacks", icon: ShieldAlert },
     ],
@@ -116,6 +118,7 @@ export function Sidebar({
                   key={href}
                   href={href}
                   className={`nav-item ${active ? "active" : ""}`}
+                  title={label}
                 >
                   <Icon size={16} strokeWidth={1.75} />
                   <span>{label}</span>

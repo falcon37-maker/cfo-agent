@@ -13,7 +13,7 @@ import { PnlTableWithRange } from "@/components/dashboard/PnlTableWithRange";
 import { MiniBarChart } from "@/components/dashboard/MiniBarChart";
 import { Greeting } from "@/components/dashboard/Greeting";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import {
   DollarSign,
   Megaphone,
@@ -143,7 +143,7 @@ export default async function TotalPnlDashboardPage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/"
             from={customFrom ?? data.range.from}
             to={customTo ?? data.range.to}
@@ -311,7 +311,9 @@ export default async function TotalPnlDashboardPage({
       </section>
 
       {/* ─── DAILY P&L ─── (title + controls live inside the card) */}
-      <PnlTableWithRange pool={tablePool.daily} />
+      <div className="pnl-ledger-themed">
+        <PnlTableWithRange pool={tablePool.daily} />
+      </div>
     </div>
   );
 }

@@ -3,7 +3,7 @@
 // + transaction-type Order Mix.
 
 import Link from "next/link";
-import { Users, CreditCard, Target, Activity } from "lucide-react";
+import { Users, CreditCard, Target, Activity, TrendingDown } from "lucide-react";
 import {
   loadLatestPortfolioSnapshot,
   loadPhxDailyRows,
@@ -19,9 +19,12 @@ import { requireTenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fmtDate, fmtInt, fmtMoney, fmtPct } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
+import { computeCohortChurn } from "@/lib/phx-cohort/churn";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import { SyncDataButton } from "@/components/pnl/SyncDataButton";
+import { TableFooter } from "@/components/subscriptions/TableFooter";
+import { SubsSearchInput } from "@/components/subscriptions/SubsTableSearch";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Subscriptions — CFO Agent" };
@@ -306,7 +309,7 @@ export default async function SubscriptionsOverviewPage({
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
-  const [snapshot, phxDays, pnlRows, paysight, paysightSubsByDate, blended] =
+  const [snapshot, phxDays, pnlRows, paysight, paysightSubsByDate, blended, churn] =
     await Promise.all([
       loadLatestPortfolioSnapshot(tenant.id),
       loadPhxDailyRows(from, to, selectedPhx, tenant.id),
@@ -320,6 +323,8 @@ export default async function SubscriptionsOverviewPage({
         { from, to },
         { storeScope: "subscription", storeIds: selectedPhx },
       ),
+      // Cohort-based monthly churn (headline only — full view on /churn).
+      computeCohortChurn(tenant.id, { maxCycle: 6 }),
     ]);
 
   const ledger = buildLedger(phxDays, pnlRows, paysightSubsByDate);
@@ -356,6 +361,52 @@ export default async function SubscriptionsOverviewPage({
           </div>
         </div>
         <div className="pnl-controls">
+          <SyncDataButton
+            sources={["paysight", "phoenix"]}
+            description="Re-pull billed subscription revenue from Paysight & Phoenix into the database."
+          />
+        </div>
+      </div>
+
+      {/* ── Lifetime KPI strip (from latest snapshot) ── */}
+      {snapshot ? (
+        <KpiStrip
+          snapshot={snapshot}
+          totals={totals}
+          churnPct={churn.monthlyChurnPct}
+        />
+      ) : (
+        <NoSnapshotBanner />
+      )}
+
+      {/* ── Filter rail — sits directly above the ledger (search + stores
+            on the left · range + date + Apply on the right). ── */}
+      <div className="subs-filterbar" role="group" aria-label="Filters">
+        <SubsSearchInput />
+        <div
+          role="group"
+          aria-label="Stores"
+          style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+        >
+          <Link
+            href={chipHrefAll}
+            className={`store-chip ${selected.length === 0 ? "active" : ""}`}
+            prefetch={false}
+          >
+            All
+          </Link>
+          {phxStores.map((id) => (
+            <Link
+              key={id}
+              href={buildToggleHref(id)}
+              className={`store-chip ${selected.includes(id) ? "active" : ""}`}
+              prefetch={false}
+            >
+              {id}
+            </Link>
+          ))}
+        </div>
+        <div className="subs-filterbar-right">
           <div className="seg" role="tablist" aria-label="Range">
             {RANGES.map((r) => (
               <SegLink
@@ -380,53 +431,26 @@ export default async function SubscriptionsOverviewPage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/subscriptions"
             from={customFrom ?? from}
             to={customTo ?? to}
             hidden={{ store: activeParam }}
           />
-          <div
-            role="group"
-            aria-label="Stores"
-            style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
-          >
-            <Link
-              href={chipHrefAll}
-              className={`store-chip ${selected.length === 0 ? "active" : ""}`}
-              prefetch={false}
-            >
-              All
-            </Link>
-            {phxStores.map((id) => (
-              <Link
-                key={id}
-                href={buildToggleHref(id)}
-                className={`store-chip ${selected.includes(id) ? "active" : ""}`}
-                prefetch={false}
-              >
-                {id}
-              </Link>
-            ))}
-          </div>
-          <SyncDataButton
-            sources={["paysight", "phoenix"]}
-            description="Re-pull billed subscription revenue from Paysight & Phoenix into the database."
-          />
         </div>
       </div>
-
-      {/* ── Lifetime KPI strip (from latest snapshot) ── */}
-      {snapshot ? (
-        <KpiStrip snapshot={snapshot} totals={totals} />
-      ) : (
-        <NoSnapshotBanner />
-      )}
 
       {/* ── Daily ledger — same blended table as the main dashboard, but
             scoped to the subscription stores only, with a 16.3% subscription
             processor Fees column (client spec Jun 2026). ── */}
-      <BlendedPnlTable rows={blended.daily} showFees feeRate={0.163} />
+      <BlendedPnlTable
+        rows={blended.daily}
+        showFees
+        feeRate={0.163}
+        csvFilename="daily-pnl-blended"
+        footerLabel={rangeLabel}
+        searchable
+      />
 
       {/* ── Paysight (parallel subscription CRM) ── */}
       {paysight.hasData ? (
@@ -463,7 +487,7 @@ function PaysightCard({
         </div>
       </div>
 
-      <div className="pnl-totals" style={{ padding: 14 }}>
+      <div className="pnl-totals pnl-totals-5" style={{ padding: 14 }}>
         <div className="total-tile">
           <div className="total-label">Revenue (window)</div>
           <div className="total-value">{fmtMoney(summary.revenue)}</div>
@@ -511,6 +535,19 @@ function PaysightCard({
           </tbody>
         </table>
       </div>
+      <TableFooter
+        count={summary.byStore.length}
+        label={rangeLabel}
+        csv={{
+          headers: ["Store", "Revenue", "Transactions"],
+          rows: summary.byStore.map((s) => [
+            s.store,
+            fmtMoney(s.revenue),
+            fmtInt(s.transactions),
+          ]),
+          filename: "paysight-by-store",
+        }}
+      />
     </div>
   );
 }
@@ -518,9 +555,11 @@ function PaysightCard({
 function KpiStrip({
   snapshot,
   totals,
+  churnPct,
 }: {
   snapshot: PhxSnapshot;
   totals: ReturnType<typeof sumLedger>;
+  churnPct: number | null;
 }) {
   // Subscription financials for the selected window (billed revenue only).
   const grossRevenue = totals.revenue;
@@ -529,7 +568,16 @@ function KpiStrip({
   // Average gross per billed order in the window.
   const avgGross = totals.orders > 0 ? grossRevenue / totals.orders : 0;
   return (
-    <section className="kpi-row kpi-5">
+    <section className="kpi-row kpi-6">
+      <KpiCard
+        label="Monthly Churn"
+        value={churnPct == null ? "—" : `${churnPct.toFixed(1)}%`}
+        delta={null}
+        deltaLabel="M1→M2 · cohort-based"
+        spark={[]}
+        sparkColor="var(--danger, #ef4444)"
+        icon={<TrendingDown size={14} strokeWidth={1.75} />}
+      />
       <KpiCard
         label="Active Subscribers"
         value={fmtInt(snapshot.active_subscribers)}
@@ -647,6 +695,19 @@ function OrderMix({
           </tfoot>
         </table>
       </div>
+      <TableFooter
+        count={rows.length}
+        label="Billed subscription counts · window"
+        csv={{
+          headers: ["Type", "Count", "% of mix"],
+          rows: rows.map((r) => [
+            r.label,
+            fmtInt(r.count),
+            total > 0 ? fmtPct(((r.count ?? 0) / total) * 100) : "—",
+          ]),
+          filename: "order-mix",
+        }}
+      />
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { loadPnlLedger } from "@/lib/pnl/queries";
 import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtPct } from "@/lib/format";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import { ExpandableLedger } from "@/components/pnl/ExpandableLedger";
 import { SyncDataButton } from "@/components/pnl/SyncDataButton";
 
@@ -141,10 +141,10 @@ export default async function PnlPage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/pnl"
-            from={customFrom ?? rows[rows.length - 1]?.date}
-            to={customTo ?? rows[0]?.date}
+            from={customFrom ?? rows[rows.length - 1]?.date ?? ""}
+            to={customTo ?? rows[0]?.date ?? ""}
             hidden={{ store: activeParam }}
           />
           <div
@@ -219,7 +219,7 @@ export default async function PnlPage({
         />
       </div>
 
-      <div className="card table-card">
+      <div className="card table-card pnl-ledger-themed" style={{ borderRadius: 12 }}>
         <div className="card-head">
           <div>
             <div className="card-title">Daily ledger</div>
