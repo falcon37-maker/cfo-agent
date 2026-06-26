@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { Download } from "lucide-react";
+import {
+  Download,
+  DollarSign,
+  Megaphone,
+  Wallet,
+  Target,
+  Percent,
+} from "lucide-react";
 import { loadPnlLedger } from "@/lib/pnl/queries";
 import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtPct } from "@/lib/format";
@@ -111,7 +118,7 @@ export default async function PnlPage({
 
   return (
     <>
-      <div className="pnl-header">
+      <div className="pnl-header" style={{ alignItems: "flex-start" }}>
         <div>
           <h2 className="section-title">Stores</h2>
           <div className="section-sub">
@@ -123,8 +130,28 @@ export default async function PnlPage({
                 : `${selected.length} stores selected`} · {subLine}
           </div>
         </div>
-        <div className="pnl-controls">
-          <div className="seg" role="tablist" aria-label="Range">
+        {/* Action buttons pinned to the top-right, on the title line. */}
+        <div
+          className="pnl-page-actions"
+          style={{ display: "flex", gap: 8, alignItems: "center" }}
+        >
+          <SyncDataButton
+            sources={["shopify"]}
+            storeIds={stores.map((s) => s.id)}
+            description="Re-pull drop-ship store (Shopify) orders & revenue for the chosen date into the database."
+          />
+          <Link href={exportHref} className="primary-btn">
+            <Download size={13} strokeWidth={2} />
+            Export CSV
+          </Link>
+        </div>
+        <div className="pnl-controls" style={{ flexBasis: "100%" }}>
+          <div
+            className="seg"
+            role="tablist"
+            aria-label="Range"
+            style={{ order: 2, marginLeft: "auto" }}
+          >
             {RANGES.map((r) => (
               <SegLink
                 key={r.id}
@@ -141,12 +168,15 @@ export default async function PnlPage({
               Custom
             </SegLink>
           </div>
-          <SubsDateRange
-            action="/pnl"
-            from={customFrom ?? rows[rows.length - 1]?.date ?? ""}
-            to={customTo ?? rows[0]?.date ?? ""}
-            hidden={{ store: activeParam }}
-          />
+          {/* Date range at the far right, after the range seg. */}
+          <div style={{ order: 3 }}>
+            <SubsDateRange
+              action="/pnl"
+              from={customFrom ?? rows[rows.length - 1]?.date ?? ""}
+              to={customTo ?? rows[0]?.date ?? ""}
+              hidden={{ store: activeParam }}
+            />
+          </div>
           <div
             role="group"
             aria-label="Stores"
@@ -155,6 +185,8 @@ export default async function PnlPage({
               gap: 6,
               flexWrap: "wrap",
               alignItems: "center",
+              // Store chips on the left (seg + date grouped on the right).
+              order: 1,
             }}
           >
             <Link
@@ -178,44 +210,37 @@ export default async function PnlPage({
               );
             })}
           </div>
-          <SyncDataButton
-            sources={["shopify"]}
-            storeIds={stores.map((s) => s.id)}
-            description="Re-pull drop-ship store (Shopify) orders & revenue for the chosen date into the database."
-          />
-          <Link href={exportHref} className="primary-btn">
-            <Download size={13} strokeWidth={2} />
-            Export CSV
-          </Link>
         </div>
       </div>
 
-      <div className="pnl-totals">
+      <div className="pnl-totals pnl-totals-5">
         <TotalTile
           label="Total Revenue"
           value={moneyShort(totals.total_revenue)}
+          icon={<DollarSign size={14} strokeWidth={1.75} />}
         />
         <TotalTile
-          label="Subs Revenue"
-          value={
-            totals.subs_revenue > 0 ? moneyShort(totals.subs_revenue) : "—"
-          }
+          label="Total Ad Spend"
+          value={moneyShort(totals.ad_spend)}
+          icon={<Megaphone size={14} strokeWidth={1.75} />}
         />
-        <TotalTile label="Total Ad Spend" value={moneyShort(totals.ad_spend)} />
         <TotalTile
           label="Net Profit"
           value={moneyShort(totals.net_profit)}
           tone={totals.net_profit >= 0 ? "pos" : "neg"}
+          icon={<Wallet size={14} strokeWidth={1.75} />}
         />
         <TotalTile
           label="Avg ROAS"
           value={totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
           tone={totals.roas >= 2 ? "pos" : totals.ad_spend > 0 ? "neg" : undefined}
+          icon={<Target size={14} strokeWidth={1.75} />}
         />
         <TotalTile
           label="Net Margin"
           value={fmtPct(totals.margin_pct)}
           tone={totals.margin_pct >= 15 ? "pos" : totals.margin_pct < 0 ? "neg" : undefined}
+          icon={<Percent size={14} strokeWidth={1.75} />}
         />
       </div>
 
@@ -267,14 +292,19 @@ function TotalTile({
   label,
   value,
   tone,
+  icon,
 }: {
   label: string;
   value: string;
   tone?: "pos" | "neg";
+  icon?: React.ReactNode;
 }) {
   return (
     <div className={`total-tile ${tone ? `tone-${tone}` : ""}`}>
-      <div className="total-label">{label}</div>
+      <div className="total-head">
+        <div className="total-label">{label}</div>
+        {icon ? <div className="total-icon">{icon}</div> : null}
+      </div>
       <div className="total-value">{value}</div>
     </div>
   );

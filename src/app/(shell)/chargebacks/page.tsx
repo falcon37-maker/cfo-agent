@@ -182,8 +182,8 @@ export default async function ChargebacksPage({
 
   return (
     <div className="dashboard-narrow">
-      <div className="pnl-header" style={{ alignItems: "center" }}>
-        <div>
+      <div className="pnl-header" style={{ alignItems: "flex-start" }}>
+        <div style={{ flex: "1 1 0%", minWidth: 0 }}>
           <div className="greet-eyebrow">Chargebacks · Alerts</div>
           <h1 className="greet-title">
             <ShieldAlert size={18} strokeWidth={2} /> {rangeLabel}
@@ -195,7 +195,7 @@ export default async function ChargebacksPage({
             cap) live on the Chargebacks tab.
           </div>
         </div>
-        <div className="pnl-controls">
+        <div className="pnl-controls" style={{ flexShrink: 0 }}>
           <div className="seg" role="tablist" aria-label="Range">
             {RANGES.map((r) => (
               <SegLink

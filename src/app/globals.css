@@ -530,6 +530,19 @@ kbd {
 .apexcharts-tooltip-title {
   background: var(--surface-2) !important;
   border-bottom: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+/* Tooltip body text — the JS theme is hard-coded "dark" (white text), which
+   disappears on the light-theme surface. Drive the text color from theme
+   tokens so the series labels/values stay readable in BOTH modes. */
+.apexcharts-tooltip-text,
+.apexcharts-tooltip-text-y-label,
+.apexcharts-tooltip-text-y-value,
+.apexcharts-tooltip-text-goals-label,
+.apexcharts-tooltip-text-goals-value,
+.apexcharts-tooltip-marker + .apexcharts-tooltip-text,
+.apexcharts-tooltip-series-group {
+  color: var(--text) !important;
 }
 .apexcharts-xaxistooltip, .apexcharts-yaxistooltip {
   background: var(--surface-3) !important;
@@ -754,7 +767,7 @@ kbd {
 .kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px; /* Paysight-match (8px radius) */
+  border-radius: 12px;
   padding: 14px 14px 12px;
   position: relative;
   overflow: hidden;
@@ -804,21 +817,20 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 10px; /* Paysight-match pill */
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 2px 6px 2px 5px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 550;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-/* Paysight-style solid badges: green pill for positive, red for negative. */
 .kpi-delta.pos {
-  background: var(--positive);
-  color: #fff;
+  background: var(--accent-bg);
+  color: var(--accent);
 }
 .kpi-delta.neg {
-  background: var(--negative);
-  color: #fff;
+  background: var(--negative-bg);
+  color: var(--negative);
 }
 .kpi-delta-label {
   font-size: 11px;
@@ -1008,6 +1020,16 @@ kbd {
   background: var(--accent-strong);
 }
 
+/* P&L header action buttons (Sync Data + Export CSV) — identical size despite
+   the ghost vs primary variants. Direct-child selector so the Sync modal's
+   own ghost/primary buttons (rendered inside SyncDataButton) stay untouched. */
+.pnl-page-actions > .ghost-btn,
+.pnl-page-actions > .primary-btn {
+  padding: 7px 12px;
+  font-size: 12px;
+  line-height: 1;
+}
+
 /* ═══ P&L ledger ═══ */
 .pnl-header {
   display: flex;
@@ -1095,6 +1117,29 @@ kbd {
   .pnl-totals.pnl-totals-5 {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+.total-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+/* Inside a head row the gap is owned by .total-head; tiles without a head
+   (e.g. the calculator) keep .total-label's own margin-bottom. */
+.total-head .total-label {
+  margin-top: 2px;
+  margin-bottom: 0;
+}
+.total-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 .total-label {
   font-size: 10.5px;
@@ -1223,6 +1268,37 @@ kbd {
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 500;
+}
+
+/* ── Frozen first column (Date) — stays put on horizontal scroll. Opt-in via
+ *    the .pnl-sticky-first marker class on the blended P&L table (dashboard AND
+ *    subscriptions). Mirrors the proven `.subs-page .pnl-table-wide` freeze so
+ *    the dashboard table — which is NOT .subs-page and not .pnl-table-wide —
+ *    gets the same behavior. Each frozen cell carries its own background so the
+ *    scrolled-under columns don't bleed through. ── */
+.pnl-sticky-first thead th:first-child,
+.pnl-sticky-first tbody td:first-child,
+.pnl-sticky-first tfoot .tfoot-row td:first-child {
+  position: sticky;
+  left: 0;
+  box-shadow: 1px 0 0 var(--border), 4px 0 8px -6px rgba(0, 0, 0, 0.35);
+}
+.pnl-sticky-first thead th:first-child {
+  z-index: 3;
+}
+.pnl-sticky-first tfoot .tfoot-row td:first-child {
+  z-index: 2;
+}
+.pnl-sticky-first tbody td:first-child {
+  z-index: 1;
+  background: var(--surface);
+}
+/* Blend the frozen cell with the dashboard ledger's zebra stripes + hover. */
+.pnl-ledger-themed .pnl-sticky-first tbody tr:nth-child(odd) td:first-child {
+  background: var(--surface-2);
+}
+.pnl-sticky-first tbody tr:hover td:first-child {
+  background: var(--surface-3);
 }
 .pnl-table tfoot .tfoot-row td.pos {
   color: var(--accent);
@@ -4096,7 +4172,8 @@ kbd {
   margin-top: 8px;
 }
 .subs-page .kpi-delta-label {
-  font-size: 10.5px;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 /* Footer + total-tile text */

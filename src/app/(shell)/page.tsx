@@ -10,7 +10,6 @@ import { RevenueAreaChart } from "@/components/charts/RevenueAreaChart";
 import { StoreDonutChart } from "@/components/charts/StoreDonutChart";
 import { SubsTrendChart } from "@/components/charts/SubsTrendChart";
 import { PnlTableWithRange } from "@/components/dashboard/PnlTableWithRange";
-import { MiniBarChart } from "@/components/dashboard/MiniBarChart";
 import { Greeting } from "@/components/dashboard/Greeting";
 import { SegLink } from "@/components/pnl/SegLink";
 import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
@@ -100,13 +99,11 @@ export default async function TotalPnlDashboardPage({
   // Subscription metrics (from latest PORTFOLIO PHX snapshot)
   const activeSubs = phx?.active_subscribers ?? null;
   const cancelledTotal = phx?.cancelled_subscribers ?? null;
-  const newSubs = phx?.new_subscribers ?? null;
-  const cancelledPeriod = phx?.cancelled_subscribers_period ?? null;
-  const netNew =
-    newSubs != null && cancelledPeriod != null
-      ? newSubs - cancelledPeriod
-      : null;
   const mrr = activeSubs != null ? activeSubs * AVG_SUB_PRICE : null;
+  // Average Order Volume = revenue per order across the range. Orders =
+  // frontend Shopify orders + billed subscription charges.
+  const totalOrders = t.shopify_orders + t.phx_subs_billed;
+  const avgOrderVolume = totalOrders > 0 ? t.total_revenue / totalOrders : null;
   const stickRate =
     activeSubs != null && cancelledTotal != null && activeSubs + cancelledTotal > 0
       ? (activeSubs / (activeSubs + cancelledTotal)) * 100
@@ -120,9 +117,14 @@ export default async function TotalPnlDashboardPage({
 
   return (
     <div className="dashboard-narrow">
-      <div className="pnl-header" style={{ alignItems: "center" }}>
-        <Greeting name={DISPLAY_NAME} />
-        <div className="pnl-controls">
+      <div
+        className="pnl-header"
+        style={{ alignItems: "center", flexWrap: "nowrap" }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <Greeting name={DISPLAY_NAME} />
+        </div>
+        <div className="pnl-controls" style={{ flexShrink: 0 }}>
           <div className="seg" role="tablist" aria-label="Range">
             {RANGES.map((r) => (
               <SegLink
@@ -217,25 +219,14 @@ export default async function TotalPnlDashboardPage({
             icon={<Users size={14} strokeWidth={1.75} />}
           />
           <SubCard
-            label="Net New Subs"
-            value={netNew != null ? `${netNew >= 0 ? "+" : ""}${netNew}` : "—"}
+            label="Average Order Volume"
+            value={avgOrderVolume != null ? fmtMoney(avgOrderVolume) : "—"}
             sub={
-              newSubs != null && cancelledPeriod != null
-                ? `${newSubs} new · ${cancelledPeriod} cxl`
-                : "awaiting Solvpath sync"
+              totalOrders > 0
+                ? `${totalOrders.toLocaleString()} orders · ${rangeLabel.toLowerCase()}`
+                : "no orders in range"
             }
             icon={<ArrowUpRight size={14} strokeWidth={1.75} />}
-            visual={
-              newSubs != null && cancelledPeriod != null ? (
-                <MiniBarChart
-                  bars={[
-                    { value: newSubs },
-                    { value: cancelledPeriod, neg: true },
-                  ]}
-                />
-              ) : null
-            }
-            tone={netNew != null && netNew >= 0 ? "pos" : netNew != null ? "neg" : undefined}
           />
           <SubCard
             label="Est. MRR"

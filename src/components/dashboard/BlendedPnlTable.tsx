@@ -174,7 +174,7 @@ export function BlendedPnlTable({
     "Shopify Orders",
     "Subs Billed",
     "Shopify Revenue",
-    "Subscription Billed",
+    "Subscription Revenue",
     ...(showManual ? ["Manual Rev"] : []),
     "Total",
     "COGS",
@@ -223,7 +223,9 @@ export function BlendedPnlTable({
       </div>
 
         <div className="table-wrap">
-          <table className={`pnl-table${searchable ? " pnl-table-wide" : ""}`}>
+          <table
+            className={`pnl-table pnl-sticky-first${searchable ? " pnl-table-wide" : ""}`}
+          >
             <thead>
               <tr>
                 <th>Date</th>
@@ -231,7 +233,7 @@ export function BlendedPnlTable({
                 <th className="num">Upsell</th>
                 <th className="num">Subs Billed</th>
                 <th className="num">Shopify Revenue</th>
-                <th className="num">Subscription Billed</th>
+                <th className="num">Subscription Revenue</th>
                 {showManual ? <th className="num">Manual Rev</th> : null}
                 <th className="num">Total</th>
                 <th className="num">COGS</th>

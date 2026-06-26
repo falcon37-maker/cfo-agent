@@ -9,10 +9,7 @@ import {
   loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
-import {
-  loadPaysightSummary,
-  loadPaysightSubsByDate,
-} from "@/lib/paysight/queries";
+import { loadPaysightSubsByDate } from "@/lib/paysight/queries";
 import { loadStores, loadBlendedDashboardData } from "@/lib/pnl/queries";
 import { BlendedPnlTable } from "@/components/dashboard/BlendedPnlTable";
 import { requireTenant } from "@/lib/tenant";
@@ -309,12 +306,11 @@ export default async function SubscriptionsOverviewPage({
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
-  const [snapshot, phxDays, pnlRows, paysight, paysightSubsByDate, blended, churn] =
+  const [snapshot, phxDays, pnlRows, paysightSubsByDate, blended, churn] =
     await Promise.all([
       loadLatestPortfolioSnapshot(tenant.id),
       loadPhxDailyRows(from, to, selectedPhx, tenant.id),
       loadDailyPnl(from, to, selectedPhx, tenant.id),
-      loadPaysightSummary(tenant.id, from, to),
       loadPaysightSubsByDate(tenant.id, from, to, selectedPhx),
       // Full blended P&L (same as main dashboard) but scoped to the
       // subscription stores only — client wants ad spend / ROAS / totals here.
@@ -452,103 +448,9 @@ export default async function SubscriptionsOverviewPage({
         searchable
       />
 
-      {/* ── Paysight (parallel subscription CRM) ── */}
-      {paysight.hasData ? (
-        <PaysightCard summary={paysight} rangeLabel={rangeLabel} />
-      ) : null}
-
       {/* ── Order mix ── */}
       <OrderMix mix={aggregateOrderMix(phxDays)} />
     </>
-  );
-}
-
-function PaysightCard({
-  summary,
-  rangeLabel,
-}: {
-  summary: import("@/lib/paysight/queries").PaysightSummary;
-  rangeLabel: string;
-}) {
-  return (
-    <div className="card table-card" style={{ marginTop: 16 }}>
-      <div className="card-head">
-        <div>
-          <div className="card-title">
-            Paysight · subscriptions{" "}
-            <span className="phx-orders-badge" title="Pulled from Paysight CRM">
-              CRM
-            </span>
-          </div>
-          <div className="card-sub">
-            {rangeLabel} · {summary.activeSubscribers} active subscribers ·
-            latest data {summary.latestTxnDate ?? "—"}
-          </div>
-        </div>
-      </div>
-
-      <div className="pnl-totals pnl-totals-5" style={{ padding: 14 }}>
-        <div className="total-tile">
-          <div className="total-label">Revenue (window)</div>
-          <div className="total-value">{fmtMoney(summary.revenue)}</div>
-        </div>
-        <div className="total-tile">
-          <div className="total-label">Successful Txns</div>
-          <div className="total-value">
-            {fmtInt(summary.successfulTransactions)}
-            <span style={{ color: "var(--muted)", fontSize: 12 }}>
-              {" "}/ {fmtInt(summary.totalTransactions)}
-            </span>
-          </div>
-        </div>
-        <div className="total-tile">
-          <div className="total-label">Active Subscribers</div>
-          <div className="total-value">{fmtInt(summary.activeSubscribers)}</div>
-        </div>
-        <div className="total-tile">
-          <div className="total-label">Refunds</div>
-          <div className="total-value">{fmtInt(summary.refundedCount)}</div>
-        </div>
-        <div className="total-tile">
-          <div className="total-label">Chargebacks</div>
-          <div className="total-value">{fmtInt(summary.chargebackCount)}</div>
-        </div>
-      </div>
-
-      <div className="table-wrap">
-        <table className="pnl-table">
-          <thead>
-            <tr>
-              <th>Store</th>
-              <th className="num">Revenue</th>
-              <th className="num">Transactions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summary.byStore.map((s) => (
-              <tr key={s.store}>
-                <td>{s.store}</td>
-                <td className="num">{fmtMoney(s.revenue)}</td>
-                <td className="num muted">{fmtInt(s.transactions)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <TableFooter
-        count={summary.byStore.length}
-        label={rangeLabel}
-        csv={{
-          headers: ["Store", "Revenue", "Transactions"],
-          rows: summary.byStore.map((s) => [
-            s.store,
-            fmtMoney(s.revenue),
-            fmtInt(s.transactions),
-          ]),
-          filename: "paysight-by-store",
-        }}
-      />
-    </div>
   );
 }
 
@@ -648,8 +550,6 @@ function OrderMix({
     { label: "Direct Sale", count: mix.direct },
     { label: "Initial Subscription", count: mix.initial },
     { label: "Recurring Subscription", count: mix.recurring },
-    { label: "Subscription Salvage", count: mix.salvage },
-    { label: "Upsell", count: mix.upsell },
   ];
   const total = rows.reduce((s, r) => s + (r.count ?? 0), 0);
 

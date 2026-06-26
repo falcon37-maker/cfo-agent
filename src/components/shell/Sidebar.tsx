@@ -9,12 +9,10 @@ import {
   Settings,
   Search,
   LogOut,
-  Calculator,
   CheckSquare,
   Megaphone,
   ShieldAlert,
   Landmark,
-  DollarSign,
   TrendingDown,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
@@ -47,10 +45,8 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: "Tools",
     items: [
-      { href: "/calculator", label: "Calculator", icon: Calculator },
       { href: "/cogs", label: "Log COGS", icon: CheckSquare },
       { href: "/ads", label: "Log Ad Spend", icon: Megaphone, roles: ["admin"] },
-      { href: "/revenue", label: "Log Revenue", icon: DollarSign, roles: ["admin"] },
     ],
   },
   {

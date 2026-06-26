@@ -204,14 +204,11 @@ export function ExpandableLedger({
             <th>Date</th>
             <th className="num">Orders</th>
             <th className="num">Revenue</th>
-            <th className="num">Subs Rev</th>
             <th className="num">Ad Spend</th>
             <th className="num">COGS</th>
             <th className="num">Fees</th>
-            <th className="num">Refunds</th>
-            <th className="num">Gross Profit</th>
-            <th className="num">Net Profit</th>
             <th className="num">ROAS</th>
+            <th className="num">Net Profit</th>
           </tr>
         </thead>
         <tbody>
@@ -240,27 +237,20 @@ export function ExpandableLedger({
               <td>Total</td>
               <td className="num">{fmtInt(totals.orders)}</td>
               <td className="num">{fmtMoney(totals.revenue)}</td>
-              <td className="num">
-                {totals.subs_revenue > 0
-                  ? fmtMoney(totals.subs_revenue)
-                  : "—"}
-              </td>
               <td className="num">{fmtMoney(totals.ad_spend)}</td>
               <td className="num">{fmtMoney(totals.cogs)}</td>
               <td className="num">{fmtMoney(totals.fees)}</td>
-              <td className="num">{fmtMoney(totals.refunds)}</td>
-              <td className="num">{fmtMoney(totals.gross_profit)}</td>
+              <td
+                className={`num roas ${totals.ad_spend > 0 ? (totals.roas >= 2 ? "pos" : "neg") : ""}`}
+              >
+                {totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
+              </td>
               <td
                 className={`num profit ${totals.net_profit >= 0 ? "pos" : "neg"}`}
               >
                 <span className="profit-pill">
                   {fmtMoney(totals.net_profit)}
                 </span>
-              </td>
-              <td
-                className={`num roas ${totals.ad_spend > 0 ? (totals.roas >= 2 ? "pos" : "neg") : ""}`}
-              >
-                {totals.ad_spend > 0 ? `${totals.roas.toFixed(2)}x` : "—"}
               </td>
             </tr>
           </tfoot>
@@ -370,48 +360,23 @@ function FragmentRow({
           </button>
         </td>
         <td>{fmtDate(r.date)}</td>
-        <td className="num muted">
-          {fmtInt(r.order_count)}
-          {r.phx_order_count > 0 ? (
-            <span
-              className="phx-orders-badge"
-              title={`+${r.phx_order_count} PHX subscription rebill${r.phx_order_count === 1 ? "" : "s"} (not shown in expand panel — separate billing system)`}
-            >
-              {" "}+{fmtInt(r.phx_order_count)} subs
-            </span>
-          ) : null}
-        </td>
+        <td className="num muted">{fmtInt(r.order_count)}</td>
         <td className="num">{fmtMoney(r.revenue)}</td>
-        <td
-          className="num"
-          style={{
-            color:
-              r.subs_revenue > 0
-                ? "var(--accent-dim)"
-                : "var(--muted-strong)",
-          }}
-        >
-          {r.subs_revenue > 0 ? fmtMoney(r.subs_revenue) : "—"}
-        </td>
         <td className="num muted">{fmtMoney(r.ad_spend)}</td>
         <td className="num muted">{fmtMoney(r.cogs)}</td>
         <td className="num muted">{fmtMoney(r.fees)}</td>
-        <td className="num muted">{fmtMoney(r.refunds)}</td>
-        <td className="num" style={{ color: "var(--text)" }}>
-          {fmtMoney(r.gross_profit)}
-        </td>
-        <td className={`num profit ${r.net_profit >= 0 ? "pos" : "neg"}`}>
-          <span className="profit-pill">{fmtMoney(r.net_profit)}</span>
-        </td>
         <td
           className={`num roas ${r.ad_spend > 0 ? (roas >= 2 ? "pos" : "neg") : ""}`}
         >
           {r.ad_spend > 0 ? `${roas.toFixed(2)}x` : "—"}
         </td>
+        <td className={`num profit ${r.net_profit >= 0 ? "pos" : "neg"}`}>
+          <span className="profit-pill">{fmtMoney(r.net_profit)}</span>
+        </td>
       </tr>
       {isOpen ? (
         <tr className="day-detail-row">
-          <td colSpan={12}>
+          <td colSpan={9}>
             <div className="day-detail-sticky">
               <div className="day-detail">
                 <DayDetailPanel

@@ -8,7 +8,7 @@ import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
-import { DateRangeForm } from "@/components/pnl/DateRangeForm";
+import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import { ChargebacksTimelineChart } from "@/components/chargebacks/TimelineChart";
 import { ShieldAlert, Trophy, Gauge, Coins } from "lucide-react";
 
@@ -217,7 +217,7 @@ export default async function ChargebacksDisputesPage({
               Custom
             </SegLink>
           </div>
-          <DateRangeForm
+          <SubsDateRange
             action="/chargebacks/disputes"
             from={customFrom ?? from}
             to={customTo ?? to}

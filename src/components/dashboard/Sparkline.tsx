@@ -9,8 +9,10 @@ export function Sparkline({
   width?: number;
   height?: number;
 }) {
+  // No data → render nothing (don't reserve the chart's width, which would
+  // squeeze the KPI footer label onto a second line on narrow cards).
   if (data.length < 2) {
-    return <svg width={width} height={height} className="sparkline" />;
+    return null;
   }
   const max = Math.max(...data);
   const min = Math.min(...data);

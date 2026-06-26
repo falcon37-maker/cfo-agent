@@ -307,8 +307,13 @@ export default async function FinancePage({
                 : `${selected.length} stores selected`}
           </div>
         </div>
-        <div className="pnl-controls">
-          <div className="seg" role="tablist" aria-label="Range">
+        <div className="pnl-controls" style={{ width: "100%" }}>
+          <div
+            className="seg"
+            role="tablist"
+            aria-label="Range"
+            style={{ order: 2, marginLeft: "auto" }}
+          >
             {RANGES.map((r) => (
               <SegLink
                 key={r.id}
@@ -332,12 +337,6 @@ export default async function FinancePage({
               Custom
             </SegLink>
           </div>
-          <SubsDateRange
-            action="/finance"
-            from={customFrom ?? from}
-            to={customTo ?? to}
-            hidden={{ store: activeParam }}
-          />
           <div
             role="group"
             aria-label="Stores"
@@ -346,6 +345,8 @@ export default async function FinancePage({
               gap: 6,
               flexWrap: "wrap",
               alignItems: "center",
+              // Store chips on the left (swapped with the range seg).
+              order: 1,
             }}
           >
             <Link
@@ -370,6 +371,15 @@ export default async function FinancePage({
                   </Link>
                 );
               })}
+          </div>
+          {/* Date range sits at the far right, after the range seg. */}
+          <div style={{ order: 3 }}>
+            <SubsDateRange
+              action="/finance"
+              from={customFrom ?? from}
+              to={customTo ?? to}
+              hidden={{ store: activeParam }}
+            />
           </div>
         </div>
       </div>

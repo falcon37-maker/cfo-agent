@@ -33,13 +33,16 @@ export function CogsForm({
   const [date, setDate] = useState(today);
   const [parsed, setParsed] = useState(0);
   const [note, setNote] = useState("");
+  // Bumped only by "Clear" to remount (and wipe) the uncontrolled AmountInput.
+  // Must NOT depend on `parsed`, or every keystroke would remount the input and
+  // steal focus after a single digit.
+  const [resetKey, setResetKey] = useState(0);
 
   const storeObj = stores.find((s) => s.id === store);
 
   return (
     <div className="entry-grid">
       <form
-        key={`cogs-${parsed}`}
         action={submitCogsAction}
         className="card entry-card"
         style={{ borderRadius: 12 }}
@@ -77,7 +80,7 @@ export function CogsForm({
               COGS amount
               <span className="field-aside mono">USD</span>
             </span>
-            <AmountInput name="cogs" onValueChange={setParsed} />
+            <AmountInput key={resetKey} name="cogs" onValueChange={setParsed} />
             <div className="field-hint">
               Paste anything — <code style={{ fontFamily: "var(--font-mono)" }}>$1,234.56</code>,{" "}
               <code style={{ fontFamily: "var(--font-mono)" }}>1234.567</code>, spaces — we
@@ -111,6 +114,7 @@ export function CogsForm({
             onClick={() => {
               setParsed(0);
               setNote("");
+              setResetKey((k) => k + 1);
             }}
           >
             Clear

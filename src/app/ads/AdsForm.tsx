@@ -40,6 +40,10 @@ export function AdsForm({
   const [platform, setPlatform] = useState("meta");
   const [parsed, setParsed] = useState(0);
   const [campaign, setCampaign] = useState("");
+  // Bumped only by "Clear" to remount (and wipe) the uncontrolled AmountInput.
+  // Must NOT depend on `parsed`, or every keystroke would remount the input and
+  // steal focus after a single digit.
+  const [resetKey, setResetKey] = useState(0);
 
   const storeObj = stores.find((s) => s.id === store);
   const platObj = PLATFORMS.find((p) => p.id === platform);
@@ -47,7 +51,6 @@ export function AdsForm({
   return (
     <div className="entry-grid">
       <form
-        key={`ads-${parsed}`}
         action={submitAdSpendAction}
         className="card entry-card"
       >
@@ -104,7 +107,7 @@ export function AdsForm({
               Spend amount
               <span className="field-aside mono">USD</span>
             </span>
-            <AmountInput name="amount" onValueChange={setParsed} />
+            <AmountInput key={resetKey} name="amount" onValueChange={setParsed} />
             <div className="field-hint">
               Paste from Ads Manager —{" "}
               <code style={{ fontFamily: "var(--font-mono)" }}>$4,820.00</code>,
@@ -141,6 +144,7 @@ export function AdsForm({
             onClick={() => {
               setParsed(0);
               setCampaign("");
+              setResetKey((k) => k + 1);
             }}
           >
             Clear

@@ -168,6 +168,11 @@ export async function loadPaysightFrontendOrdersByDate(
   to: string,
   storeIds?: string[],
 ): Promise<Map<string, PaysightFrontend>> {
+  // An explicit empty store list means "no stores in scope" → no rows.
+  // (undefined still means "all stores".) Without this guard the `.in()`
+  // filter below is skipped for `[]`, silently returning every store's data —
+  // which leaked subscription-store rows into drop-ship-only callers.
+  if (storeIds && storeIds.length === 0) return new Map();
   const sb = supabaseAdmin();
   const rows: Array<{
     txn_date: string | null;
@@ -231,6 +236,11 @@ export async function loadPaysightSubsByDate(
   to: string,
   storeIds?: string[],
 ): Promise<Map<string, PaysightDaySubs>> {
+  // An explicit empty store list means "no stores in scope" → no rows.
+  // (undefined still means "all stores".) Without this guard the `.in()`
+  // filter below is skipped for `[]`, silently returning every store's data —
+  // which leaked subscription-store rows into drop-ship-only callers.
+  if (storeIds && storeIds.length === 0) return new Map();
   const sb = supabaseAdmin();
   // Page through results — Supabase caps a single response at 1000 rows, and a
   // multi-week window exceeds that, silently dropping rows (the oldest dates
