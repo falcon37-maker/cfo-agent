@@ -480,7 +480,11 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  overflow-x: hidden;
+  /* `clip` (not `hidden`) so the horizontal overflow is still contained WITHOUT
+     forcing overflow-y to `auto` — `hidden` would clip the vertical axis too,
+     cutting off absolutely-positioned dropdowns (e.g. the Filter popover) when
+     the content below them is short. */
+  overflow-x: clip;
   /* Cap content width and centre it so wide monitors don't leave a big empty
      gutter on one side (content was left-aligning inside a full-width area). */
   width: 100%;
@@ -4827,3 +4831,7 @@ kbd {
 .cohort-table th,
 .cohort-table td { white-space: nowrap; }
 .cohort-table td.num { font-variant-numeric: tabular-nums; }
+
+/* PDF "remove" pill button on the Finance overview */
+.pdf-remove-x { transition: background .12s ease, color .12s ease; }
+.pdf-remove-x:hover { background: var(--border-strong); color: var(--negative); }

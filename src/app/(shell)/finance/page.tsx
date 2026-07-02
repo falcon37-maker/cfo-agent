@@ -12,13 +12,38 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SegLink } from "@/components/pnl/SegLink";
 import { SubsDateRange } from "@/components/subscriptions/SubsDateRange";
 import { FinanceMonthlyTrend } from "@/components/finance/MonthlyTrend";
+import { UploadPdfButton } from "@/components/finance/UploadPdfButton";
+import { PdfPreviewModal } from "@/components/finance/PdfPreviewModal";
+import { summarizePdf, listPdfTransactions } from "@/lib/zoho/labels";
 import {
   DollarSign,
   Scissors,
   Landmark,
   Percent,
   Wallet,
+  FileText,
 } from "lucide-react";
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** Combine two monthly-trend series by month (Zoho + applied PDF). */
+function mergeMonthly(a: MonthRow[], b: MonthRow[]): MonthRow[] {
+  const m = new Map<string, MonthRow>();
+  for (const r of [...a, ...b]) {
+    const e = m.get(r.ym) ?? { ym: r.ym, gross: 0, fees: 0, net: 0 };
+    e.gross += r.gross;
+    e.fees += r.fees;
+    e.net += r.net;
+    m.set(r.ym, e);
+  }
+  return [...m.values()].sort((x, y) => x.ym.localeCompare(y.ym));
+}
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Finance — CFO Agent" };
@@ -116,6 +141,9 @@ export default async function FinancePage({
     from?: string;
     to?: string;
     store?: string;
+    pdf_preview?: string;
+    pdf_applied?: string;
+    pdf_err?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -133,6 +161,15 @@ export default async function FinancePage({
     : `Last ${range.days} days`;
 
   const tenant = await requireTenant();
+
+  // Applied PDF (fills the fields) + a not-yet-applied preview (modal).
+  const [pdfSummary, pdfPreview] = await Promise.all([
+    summarizePdf(tenant.id, "confirmed").catch(() => null),
+    summarizePdf(tenant.id, "preview").catch(() => null),
+  ]);
+  const previewTxns = pdfPreview
+    ? await listPdfTransactions(tenant.id, "preview").catch(() => [])
+    : [];
 
   // Resolve which stores feed each side (Shopify-direct vs PHX-source).
   const stores = await loadStores(tenant.id);
@@ -289,6 +326,40 @@ export default async function FinancePage({
     sourceRows.push({ label: "PHX Upsell", revenue: phxUpsell, orders: 0 });
   }
 
+  // An applied PDF statement is ADDED on top of the existing Zoho numbers
+  // (not a replacement) — every field below = Zoho + PDF.
+  const dGrossRevenue = grossRevenue + (pdfSummary?.grossRevenue ?? 0);
+  const dTotalDeductions = totalDeductions + (pdfSummary?.totalFees ?? 0);
+  const dNetRevenue = dGrossRevenue - dTotalDeductions;
+  const dEffectiveFeeRate =
+    dGrossRevenue > 0 ? (dTotalDeductions / dGrossRevenue) * 100 : 0;
+  const dNetCash = netCashEstimate + (pdfSummary?.net ?? 0);
+  const dMonthly = pdfSummary
+    ? mergeMonthly(monthly, pdfSummary.monthly)
+    : monthly;
+  const dFeeRows = pdfSummary
+    ? [
+        ...feeRows,
+        ...pdfSummary.feeBreakdown.map((f) => ({
+          label: f.category,
+          amount: f.amount,
+          note: `From uploaded PDF · ${f.count} txn${f.count === 1 ? "" : "s"}`,
+        })),
+      ]
+    : feeRows;
+  const dSourceRows = pdfSummary
+    ? [
+        ...sourceRows,
+        ...pdfSummary.revenueBySource.map((r) => ({
+          label: `${r.category} (PDF)`,
+          revenue: r.amount,
+          orders: r.count,
+        })),
+      ]
+    : sourceRows;
+  const dSourceOrders = dSourceRows.reduce((s, r) => s + r.orders, 0);
+  const dSourceAov = dSourceOrders > 0 ? dGrossRevenue / dSourceOrders : 0;
+
   return (
     <div className="dashboard-narrow">
       <div className="pnl-header" style={{ alignItems: "center" }}>
@@ -307,6 +378,12 @@ export default async function FinancePage({
                 : `${selected.length} stores selected`}
           </div>
         </div>
+
+        {/* PDF control — top-right, above the date; drives the fields below */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <UploadPdfButton />
+        </div>
+
         <div className="pnl-controls" style={{ width: "100%" }}>
           <div
             className="seg"
@@ -384,23 +461,54 @@ export default async function FinancePage({
         </div>
       </div>
 
+      {params.pdf_err ? (
+        <div className="card" style={{ padding: 14, color: "var(--negative)", fontSize: 12.5 }}>
+          Error: {safeDecode(params.pdf_err)}
+        </div>
+      ) : null}
+      {params.pdf_preview === "0" ? (
+        <div className="card" style={{ padding: 14, fontSize: 12.5 }}>
+          No transactions found in that PDF — it may be a scanned/image PDF the
+          reader couldn&apos;t parse.
+        </div>
+      ) : null}
+      {params.pdf_applied ? (
+        <div
+          className="card"
+          style={{ padding: 14, fontSize: 12.5, color: "var(--accent)", display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <FileText size={14} strokeWidth={2} />
+          {pdfSummary?.fileName ? <strong>{pdfSummary.fileName}</strong> : "PDF"}{" "}
+          applied — {params.pdf_applied} transaction
+          {params.pdf_applied === "1" ? "" : "s"} added to the fields below.
+        </div>
+      ) : null}
+
+      {pdfPreview ? (
+        <PdfPreviewModal summary={pdfPreview} txns={previewTxns} />
+      ) : null}
+
       {/* ── KPIs ── */}
       <section>
         <div className="section-eyebrow">Cash signal</div>
         <div className="kpi-row kpi-5">
           <KpiCard
             label="Gross Revenue"
-            value={fmtMoney(grossRevenue)}
+            value={fmtMoney(dGrossRevenue)}
             delta={null}
-            deltaLabel="Shopify + PHX in range"
+            deltaLabel={pdfSummary ? "Shopify + PHX + PDF" : "Shopify + PHX in range"}
             spark={[]}
             icon={<DollarSign size={14} strokeWidth={1.75} />}
           />
           <KpiCard
             label="Total Fees & Deductions"
-            value={fmtMoney(totalDeductions)}
+            value={fmtMoney(dTotalDeductions)}
             delta={null}
-            deltaLabel="processing + gateway + alerts + refunds"
+            deltaLabel={
+              pdfSummary
+                ? "fees + refunds + PDF"
+                : "processing + gateway + alerts + refunds"
+            }
             spark={[]}
             sparkColor="var(--negative)"
             invert
@@ -408,16 +516,16 @@ export default async function FinancePage({
           />
           <KpiCard
             label="Net Revenue"
-            value={fmtMoney(netRevenue)}
+            value={fmtMoney(dNetRevenue)}
             delta={null}
             deltaLabel="gross − all deductions"
             spark={[]}
-            sparkColor={netRevenue >= 0 ? "var(--accent)" : "var(--negative)"}
+            sparkColor={dNetRevenue >= 0 ? "var(--accent)" : "var(--negative)"}
             icon={<Landmark size={14} strokeWidth={1.75} />}
           />
           <KpiCard
             label="Effective Fee Rate"
-            value={`${effectiveFeeRate.toFixed(2)}%`}
+            value={`${dEffectiveFeeRate.toFixed(2)}%`}
             delta={null}
             deltaLabel="deductions / gross"
             spark={[]}
@@ -425,13 +533,11 @@ export default async function FinancePage({
           />
           <KpiCard
             label="Net Cash (est.)"
-            value={fmtMoney(netCashEstimate)}
+            value={fmtMoney(dNetCash)}
             delta={null}
-            deltaLabel="net rev − ad spend − COGS"
+            deltaLabel={pdfSummary ? "net rev − costs + PDF" : "net rev − ad spend − COGS"}
             spark={[]}
-            sparkColor={
-              netCashEstimate >= 0 ? "var(--accent)" : "var(--negative)"
-            }
+            sparkColor={dNetCash >= 0 ? "var(--accent)" : "var(--negative)"}
             icon={<Wallet size={14} strokeWidth={1.75} />}
           />
         </div>
@@ -441,7 +547,7 @@ export default async function FinancePage({
       <section>
         <div className="section-eyebrow">Monthly trend · last 12 months</div>
         <div className="card" style={{ padding: 16 }}>
-          <FinanceMonthlyTrend months={monthly} />
+          <FinanceMonthlyTrend months={dMonthly} />
         </div>
       </section>
 
@@ -460,9 +566,9 @@ export default async function FinancePage({
                 </tr>
               </thead>
               <tbody>
-                {feeRows.map((r) => {
+                {dFeeRows.map((r) => {
                   const pct =
-                    grossRevenue > 0 ? (r.amount / grossRevenue) * 100 : 0;
+                    dGrossRevenue > 0 ? (r.amount / dGrossRevenue) * 100 : 0;
                   return (
                     <tr key={r.label}>
                       <td>{r.label}</td>
@@ -478,15 +584,15 @@ export default async function FinancePage({
               <tfoot>
                 <tr className="tfoot-row">
                   <td>Total Deductions</td>
-                  <td className="num">{fmtMoney(totalDeductions)}</td>
-                  <td className="num">{effectiveFeeRate.toFixed(2)}%</td>
+                  <td className="num">{fmtMoney(dTotalDeductions)}</td>
+                  <td className="num">{dEffectiveFeeRate.toFixed(2)}%</td>
                   <td />
                 </tr>
                 <tr className="tfoot-row">
                   <td>Net After Deductions</td>
-                  <td className="num">{fmtMoney(netRevenue)}</td>
+                  <td className="num">{fmtMoney(dNetRevenue)}</td>
                   <td className="num">
-                    {(100 - effectiveFeeRate).toFixed(2)}%
+                    {(100 - dEffectiveFeeRate).toFixed(2)}%
                   </td>
                   <td />
                 </tr>
@@ -511,7 +617,7 @@ export default async function FinancePage({
                 </tr>
               </thead>
               <tbody>
-                {sourceRows.map((r) => {
+                {dSourceRows.map((r) => {
                   const aov = r.orders > 0 ? r.revenue / r.orders : 0;
                   return (
                     <tr key={r.label}>
@@ -530,13 +636,11 @@ export default async function FinancePage({
               <tfoot>
                 <tr className="tfoot-row">
                   <td>Total</td>
-                  <td className="num">{fmtMoney(grossRevenue)}</td>
+                  <td className="num">{fmtMoney(dGrossRevenue)}</td>
+                  <td className="num">{fmtInt(dSourceOrders)}</td>
                   <td className="num">
-                    {fmtInt(
-                      sourceRows.reduce((s, r) => s + r.orders, 0),
-                    )}
+                    {dSourceAov > 0 ? fmtMoney(dSourceAov) : "—"}
                   </td>
-                  <td className="num">—</td>
                 </tr>
               </tfoot>
             </table>
