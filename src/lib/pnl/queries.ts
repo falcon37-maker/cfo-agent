@@ -922,14 +922,21 @@ export async function loadPnlLedger(
       Number(j.recurringCount ?? 0) +
       Number(j.salvageCount ?? 0);
     const upsellOrders = Number(j.upsellCount ?? 0);
+    // KEY NORMALIZATION (bug fix): daily_pnl.date comes back as a plain
+    // 'YYYY-MM-DD' string, but phx range_from is a timestamptz and comes back
+    // as a full ISO string ('...T19:00:00.000Z'). Keying phxByDate on the raw
+    // range_from meant phxByDate.get(dailyDate) never matched → subs revenue
+    // silently dropped to 0. Both represent the SAME store-local day, so
+    // collapse range_from to the same YYYY-MM-DD the daily_pnl keys use.
+    const dayKey = phxDayKey(r.range_from);
     const cur =
-      phxByDate.get(r.range_from) ??
+      phxByDate.get(dayKey) ??
       { subs: 0, upsell: 0, subOrders: 0, upsellOrders: 0 };
     cur.subs += subs;
     cur.upsell += upsell;
     cur.subOrders += subOrders;
     cur.upsellOrders += upsellOrders;
-    phxByDate.set(r.range_from, cur);
+    phxByDate.set(dayKey, cur);
   }
 
   // Drop-ship stores all bill through the same ~3.9% processor (client spec).
@@ -1032,6 +1039,24 @@ function diffDays(from: string, to: string): number {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+// Collapse a phx range_from value to the same 'YYYY-MM-DD' string that
+// daily_pnl.date returns, so the two maps key-match. range_from is a
+// timestamptz stored at store-local midnight (PHX stores = America/New_York);
+// a plain ISO .slice(0,10) would shift it a day west of midnight, so we format
+// in the store timezone. A value that's already a plain 'YYYY-MM-DD' (no 'T')
+// passes through unchanged.
+const PHX_TZ = "America/New_York";
+const phxDayFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: PHX_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+function phxDayKey(value: string): string {
+  if (!value.includes("T")) return value.slice(0, 10);
+  return phxDayFmt.format(new Date(value));
+}
 
 function groupByDate(rows: RawPnlRow[]): Record<string, RawPnlRow[]> {
   const out: Record<string, RawPnlRow[]> = {};

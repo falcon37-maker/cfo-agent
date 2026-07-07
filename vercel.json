@@ -5,7 +5,8 @@
     "src/app/api/sync/solvpath/route.ts": { "maxDuration": 800 },
     "src/app/api/sync/solvpath/limit-probe/route.ts": { "maxDuration": 800 },
     "src/app/api/cron/solvpath-daily/route.ts": { "maxDuration": 800 },
-    "src/app/api/sync/paysight/route.ts": { "maxDuration": 800 }
+    "src/app/api/sync/paysight/route.ts": { "maxDuration": 800 },
+    "src/app/mcp/route.ts": { "maxDuration": 300 }
   },
   "crons": [
     {

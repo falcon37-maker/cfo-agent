@@ -240,6 +240,41 @@ export const ALLOWED_TABLES: TableMeta[] = [
   },
 
   {
+    name: "paysight_transactions",
+    description:
+      "Paysight payment processor — one row per individual transaction (checkout charges AND subscription rebills) for Paysight-processed stores. This is the raw transaction ledger, separate from the PHX/Solvpath subscription snapshots in phx_summary_snapshots.",
+    has_tenant_id: true,
+    columns: [
+      { name: "id", type: "bigint" },
+      { name: "store_id", type: "text", description: "Store code" },
+      { name: "amount", type: "numeric", description: "Transaction amount" },
+      { name: "currency", type: "text" },
+      { name: "status", type: "text", description: "Transaction status text" },
+      { name: "success", type: "boolean", description: "TRUE = the charge succeeded. Always filter success=true for revenue." },
+      { name: "refunded", type: "boolean" },
+      { name: "charged_back", type: "boolean" },
+      { name: "txn_date", type: "date", description: "Calendar day of the transaction (store timezone)" },
+      { name: "completed_at", type: "timestamptz" },
+      { name: "payment_number", type: "int4", description: "Billing cycle number. 0 = initial checkout order (this is STORE revenue, not subscription revenue). >=1 = a subscription REBILL." },
+      { name: "attempt", type: "int4", description: "Retry attempt within a payment_number" },
+      { name: "sub_id", type: "bigint", description: "Subscription id this transaction belongs to (null for one-off)" },
+      { name: "gateway", type: "text" },
+      { name: "mid", type: "text", description: "Merchant account id" },
+      { name: "descriptor", type: "text" },
+      // NOTE: email / first_name / last_name / last4 / bin deliberately NOT
+      // exposed here (PII).
+    ],
+    usage_notes: [
+      "For revenue, ALWAYS filter success=true. Failed/declined attempts have success=false and must be excluded.",
+      "SUBSCRIPTION revenue (a.k.a. 'Subs Rev') from Paysight = rebills only: filter payment_number >= 1. Rows with payment_number = 0 are the initial checkout order and count as STORE (Shopify) revenue, NOT subscription revenue.",
+      "For 'today's Paysight subscription revenue', filter txn_date = today, success = true, payment_number >= 1, and sum(amount).",
+      "For total Paysight processed volume (all charges incl. checkout), filter success = true and sum(amount) with no payment_number filter.",
+      "Total platform Subscription Revenue = PHX billed (phx_summary_snapshots: revenue_initial + revenue_recurring + revenue_salvage for NOVA/NURA/KOVA) PLUS Paysight rebills (this table, payment_number >= 1). They are additive across different stores.",
+      "To subtract refunds/chargebacks, exclude refunded=true and charged_back=true, or account for them separately.",
+    ],
+  },
+
+  {
     name: "products",
     description:
       "Per-variant product catalog with COGS. One row per (store_id, shopify_variant_id).",

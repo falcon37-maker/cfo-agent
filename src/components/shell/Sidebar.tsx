@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Landmark,
   TrendingDown,
+  Plug,
 } from "lucide-react";
 import { signOutAction } from "@/app/login/actions";
 import type { Role } from "@/lib/auth/roles";
@@ -53,6 +54,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Configuration",
     items: [
       { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
+      { href: "/mcp-connector", label: "MCP Connector", icon: Plug, roles: ["admin"] },
     ],
   },
 ];

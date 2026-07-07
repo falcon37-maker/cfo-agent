@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { loadStores, loadPnlLedger } from "@/lib/pnl/queries";
+import { loadStores, loadBlendedDashboardData } from "@/lib/pnl/queries";
 import {
   loadLatestPortfolioSnapshot,
   loadPhxDailyRows,
@@ -290,29 +290,32 @@ async function getDashboardSummary(
   ctx: ToolContext,
 ) {
   const spec = resolveRange(range);
-  // Use loadPnlLedger across all stores so the totals here match what the
-  // /pnl page shows the user. (loadBlendedDashboardData computes a
-  // different blend — PHX stores replace their Shopify revenue with PHX
-  // totals — which produced numbers that conflicted with the UI.)
-  const ledger = await loadPnlLedger(spec, "all", ctx.tenantId);
+  // Use the SAME blended source as the main /dashboard page so the numbers
+  // the agent reports match exactly what the owner sees. (The earlier
+  // loadPnlLedger path was drop-ship-only — it dropped NOVA/NURA/KOVA's
+  // Shopify revenue and reported $0 for subscription-heavy tenants.)
+  const data = await loadBlendedDashboardData(ctx.tenantId, spec);
+  const t = data.periodTotals;
+  const orders = t.shopify_orders + t.phx_subs_billed;
   return {
-    range: spec,
+    range: data.range,
     totals: {
-      revenue: round(ledger.totals.revenue),
-      subs_revenue: round(ledger.totals.subs_revenue),
-      total_revenue: round(ledger.totals.total_revenue),
-      cogs: round(ledger.totals.cogs),
-      fees: round(ledger.totals.fees),
-      refunds: round(ledger.totals.refunds),
-      ad_spend: round(ledger.totals.ad_spend),
-      gross_profit: round(ledger.totals.gross_profit),
-      net_profit: round(ledger.totals.net_profit),
-      orders: ledger.totals.orders,
-      roas: round(ledger.totals.roas, 2),
-      margin_pct: round(ledger.totals.margin_pct, 1),
+      revenue: round(t.shopify_revenue + t.phx_frontend_revenue),
+      subs_revenue: round(t.phx_subs_revenue),
+      total_revenue: round(t.total_revenue),
+      cogs: round(t.shopify_cogs),
+      refunds: round(t.shopify_refunds),
+      ad_spend: round(t.shopify_ad_spend),
+      net_profit: round(t.total_net_profit),
+      orders,
+      shopify_orders: t.shopify_orders,
+      subs_billed: t.phx_subs_billed,
+      roas: round(t.roas, 2),
+      margin_pct: round(t.margin_pct, 1),
+      source_mix: data.sourceMix,
     },
     note:
-      "Numbers match the /pnl page exactly. 'revenue' = Shopify front-end across all stores. 'subs_revenue' = PHX Initial + Recurring + Salvage for NOVA/NURA/KOVA. 'total_revenue' = revenue + subs_revenue.",
+      "Blended totals — identical to the main dashboard. 'revenue' = Shopify front-end + PHX upsell. 'subs_revenue' = billed subscription revenue (Phoenix Initial+Recurring+Salvage plus Paysight rebills). 'total_revenue' = revenue + subs_revenue.",
   };
 }
 
@@ -322,23 +325,60 @@ async function getPnlForStore(
 ) {
   const spec = resolveRange(args);
   const storeId = args.store_id.toUpperCase();
-  const ledger = await loadPnlLedger(spec, [storeId], ctx.tenantId);
+  // Validate the store exists for this tenant so an unknown id returns a clear
+  // message ("no such store, here are the valid ones") instead of a silent
+  // page of zeros that reads as a real-but-empty store.
+  const stores = await loadStores(ctx.tenantId);
+  const known = stores.filter((s) => s.id !== "PORTFOLIO").map((s) => s.id);
+  if (!known.includes(storeId)) {
+    return {
+      error: `Unknown store "${storeId}".`,
+      valid_stores: known,
+      hint: "Call list_stores to see every store id for this account.",
+    };
+  }
+  // Use the blended source scoped to this one store so PHX subscription stores
+  // (NOVA/NURA/KOVA) report their real revenue. The old loadPnlLedger path was
+  // drop-ship-only and returned all-zeros for PHX stores.
+  const data = await loadBlendedDashboardData(ctx.tenantId, spec, {
+    storeIds: [storeId],
+  });
+  const rows = data.daily
+    .slice()
+    .reverse() // newest first
+    .slice(0, 60)
+    .map((r) => {
+      const revenue = r.shopify_revenue + r.phx_frontend_revenue;
+      return {
+        date: r.date,
+        revenue: round(revenue),
+        subs_revenue: round(r.phx_subs_revenue),
+        total_revenue: round(r.total_revenue),
+        cogs: round(r.shopify_cogs),
+        refunds: round(r.shopify_refunds),
+        ad_spend: round(r.shopify_ad_spend),
+        net_profit: round(r.total_net_profit),
+        orders: r.shopify_orders,
+        subs_billed: r.phx_subs_billed,
+      };
+    });
+  const t = data.periodTotals;
   return {
     store_id: storeId,
-    rows: ledger.rows.slice(0, 60).map((r) => ({
-      date: r.date,
-      revenue: round(r.revenue),
-      subs_revenue: round(r.subs_revenue),
-      total_revenue: round(r.total_revenue),
-      cogs: round(r.cogs),
-      fees: round(r.fees),
-      refunds: round(r.refunds),
-      ad_spend: round(r.ad_spend),
-      net_profit: round(r.net_profit),
-      margin_pct: round(r.margin_pct, 1),
-      orders: r.order_count,
-    })),
-    totals: ledger.totals,
+    rows,
+    totals: {
+      revenue: round(t.shopify_revenue + t.phx_frontend_revenue),
+      subs_revenue: round(t.phx_subs_revenue),
+      total_revenue: round(t.total_revenue),
+      cogs: round(t.shopify_cogs),
+      refunds: round(t.shopify_refunds),
+      ad_spend: round(t.shopify_ad_spend),
+      net_profit: round(t.total_net_profit),
+      orders: t.shopify_orders,
+      subs_billed: t.phx_subs_billed,
+      roas: round(t.roas, 2),
+      margin_pct: round(t.margin_pct, 1),
+    },
   };
 }
 

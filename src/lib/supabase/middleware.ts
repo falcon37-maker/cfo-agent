@@ -21,6 +21,8 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/sync/paysight")) return true;
   if (pathname.startsWith("/api/sync/chargeblast")) return true;
   if (pathname.startsWith("/api/webhooks/")) return true;
+  // Remote MCP server authenticates via Bearer token in the route, not Supabase.
+  if (pathname === "/mcp" || pathname.startsWith("/mcp/")) return true;
   return false;
 }
 
