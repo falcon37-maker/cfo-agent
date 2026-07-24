@@ -27,6 +27,10 @@ function isPublic(pathname: string): boolean {
   // probes these before it will use the token). Must return JSON, never a
   // redirect to /login — otherwise discovery fails and the connector hangs.
   if (pathname.startsWith("/.well-known/")) return true;
+  // OAuth handshake endpoints (src/app/oauth/*). /register and /token are
+  // machine-to-machine; /authorize reads the session itself and does its own
+  // /login bounce, so the middleware must not intercept it.
+  if (pathname.startsWith("/oauth/")) return true;
   return false;
 }
 

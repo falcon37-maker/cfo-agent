@@ -1,11 +1,9 @@
 // OAuth 2.0 Protected Resource Metadata (RFC 9728).
 //
 // Claude.ai's MCP "Connect" flow fetches this first to discover how to
-// authenticate against our /mcp endpoint. We use a static pre-shared bearer
-// token (supplied in the connector URL as ?token=...), NOT an interactive
-// OAuth grant — so we deliberately do NOT advertise an `authorization_servers`
-// entry. Omitting it stops the client from chasing a nonexistent
-// authorization-server handshake; it just uses the bearer token it already has.
+// authenticate against our /mcp endpoint. It points the client at our own
+// origin as the authorization server; the client then reads
+// /.well-known/oauth-authorization-server and runs the OAuth handshake there.
 //
 // NOTE: this path is exempted from Supabase auth in src/lib/supabase/middleware.ts
 // (the /.well-known/ prefix) so it returns JSON instead of a 307 to /login.
@@ -18,6 +16,7 @@ export async function GET(req: Request): Promise<Response> {
   return Response.json(
     {
       resource: `${origin}/mcp`,
+      authorization_servers: [origin],
       bearer_methods_supported: ["header"],
       scopes_supported: ["mcp"],
     },
