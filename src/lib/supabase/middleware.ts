@@ -23,6 +23,10 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/webhooks/")) return true;
   // Remote MCP server authenticates via Bearer token in the route, not Supabase.
   if (pathname === "/mcp" || pathname.startsWith("/mcp/")) return true;
+  // OAuth discovery metadata for the MCP connector (Claude.ai's "Connect" flow
+  // probes these before it will use the token). Must return JSON, never a
+  // redirect to /login — otherwise discovery fails and the connector hangs.
+  if (pathname.startsWith("/.well-known/")) return true;
   return false;
 }
 
