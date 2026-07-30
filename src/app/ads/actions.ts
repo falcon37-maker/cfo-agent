@@ -144,29 +144,38 @@ function round2(n: number): number {
 }
 
 /**
- * Recompute daily_ad_spend for a (store, date, platform) from the latest
- * matching ad_spend_entries row, then roll up all platforms into
- * daily_pnl.ad_spend and recompute profit fields.
+ * Adjust daily_ad_spend for a (store, date, platform) BY `delta` (negative to
+ * remove), then roll up all platforms into daily_pnl.ad_spend and recompute
+ * profit fields.
+ *
+ * Delta, not "recompute from entries": a store runs 2–3 ad accounts on the same
+ * day, so a cell legitimately holds several entries, and CSV-imported spend has
+ * no ad_spend_entries rows at all. This used to set the cell to the LATEST
+ * entry's amount, which silently dropped every other entry for that day — KOVA
+ * 2026-07-29 lost $2,573.06 that way the moment one of its two entries was
+ * edited. `submitAdSpendAction` already accumulates on insert; edit/delete now
+ * mirror that by applying only the difference.
  */
-async function recomputeAdSpendFor(
+async function adjustAdSpendBy(
   sb: ReturnType<typeof supabaseAdmin>,
   storeId: string,
   date: string,
   platform: string,
+  delta: number,
   now: string,
   tenantId: string,
 ): Promise<"ok" | "db"> {
-  // Use the latest remaining entry for this (store, date, platform) as the
-  // canonical spend. If none remain, set daily_ad_spend to 0.
-  const { data: latest } = await sb
-    .from("ad_spend_entries")
-    .select("amount")
+  const { data: existing, error: readErr } = await sb
+    .from("daily_ad_spend")
+    .select("spend")
     .eq("tenant_id", tenantId)
     .eq("store_id", storeId)
     .eq("date", date)
-    .order("submitted_at", { ascending: false })
-    .limit(1);
-  const spend = round2(Number(latest?.[0]?.amount ?? 0));
+    .eq("platform", platform)
+    .maybeSingle();
+  if (readErr) return "db";
+  // Never let rounding drift push a cell negative.
+  const spend = Math.max(0, round2(Number(existing?.spend ?? 0) + delta));
 
   const { error: upErr } = await sb.from("daily_ad_spend").upsert(
     {
@@ -265,32 +274,46 @@ export async function updateAdSpendEntryAction(formData: FormData) {
 
   const { data: before, error: readErr } = await sb
     .from("ad_spend_entries")
-    .select("store_id, date")
+    .select("store_id, date, amount")
     .eq("tenant_id", tenant.id)
     .eq("id", id)
     .maybeSingle();
   if (readErr || !before) redirect("/ads?err=notfound");
 
+  const oldAmount = round2(Number(before.amount ?? 0));
+  const newAmount = round2(amount);
+
   const { error: updErr } = await sb
     .from("ad_spend_entries")
-    .update({ store_id: storeId, date, amount: round2(amount) })
+    .update({ store_id: storeId, date, amount: newAmount })
     .eq("tenant_id", tenant.id)
     .eq("id", id);
   if (updErr) redirect("/ads?err=db");
 
-  // Recompute NEW (store, date) cell.
-  if ((await recomputeAdSpendFor(sb, storeId, date, "facebook", now, tenant.id)) !== "ok") {
-    redirect("/ads?err=db");
-  }
-
-  // If moved, recompute OLD cell too.
-  if (before.store_id !== storeId || before.date !== date) {
+  const moved = before.store_id !== storeId || before.date !== date;
+  if (moved) {
+    // Two cells to touch: take the old amount off the cell it left, add the new
+    // amount to the cell it landed in. Any other entries in either cell stay.
     if (
-      (await recomputeAdSpendFor(sb, before.store_id, before.date, "facebook", now, tenant.id)) !==
-      "ok"
+      (await adjustAdSpendBy(
+        sb, before.store_id, before.date, "facebook", -oldAmount, now, tenant.id,
+      )) !== "ok"
     ) {
       redirect("/ads?err=db");
     }
+    if (
+      (await adjustAdSpendBy(
+        sb, storeId, date, "facebook", newAmount, now, tenant.id,
+      )) !== "ok"
+    ) {
+      redirect("/ads?err=db");
+    }
+  } else if (
+    (await adjustAdSpendBy(
+      sb, storeId, date, "facebook", newAmount - oldAmount, now, tenant.id,
+    )) !== "ok"
+  ) {
+    redirect("/ads?err=db");
   }
 
   revalidatePath("/ads");
@@ -318,7 +341,7 @@ export async function deleteAdSpendEntryAction(formData: FormData) {
 
   const { data: entry, error: readErr } = await sb
     .from("ad_spend_entries")
-    .select("store_id, date")
+    .select("store_id, date, amount")
     .eq("tenant_id", tenant.id)
     .eq("id", id)
     .maybeSingle();
@@ -331,7 +354,18 @@ export async function deleteAdSpendEntryAction(formData: FormData) {
     .eq("id", id);
   if (delErr) redirect("/ads?err=db");
 
-  if ((await recomputeAdSpendFor(sb, entry.store_id, entry.date, "facebook", now, tenant.id)) !== "ok") {
+  // Subtract only this entry — the day's other entries keep their spend.
+  if (
+    (await adjustAdSpendBy(
+      sb,
+      entry.store_id,
+      entry.date,
+      "facebook",
+      -round2(Number(entry.amount ?? 0)),
+      now,
+      tenant.id,
+    )) !== "ok"
+  ) {
     redirect("/ads?err=db");
   }
 

@@ -12,16 +12,21 @@ import {
   loadPaysightFrontendOrdersByDate,
 } from "@/lib/paysight/queries";
 
-// Stores for which PHX/Solvpath is the source of truth for revenue. For any
-// other store, Shopify's daily_pnl stays the source (future stores that only
-// use Shopify Payments land here by default).
-const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
-
+// Stores for which PHX/Solvpath is the source of truth for revenue, and the
+// processing-fee rates that apply to each kind of store. Both live in
+// @/lib/pnl/fees so the dashboard, Subscriptions, Finance and Stores pages
+// can't drift apart. For any store outside PHX_STORE_IDS, Shopify's daily_pnl
+// stays the revenue source (future stores that only use Shopify Payments land
+// there by default).
+//
 // Per client spec (Jun 2026 meeting): the Stores page shows ONLY the Shopify
 // drop-shipping stores. NOVA/NURA/KOVA are subscription stores and live on the
 // Subscriptions page, so they're excluded from the Stores ledger.
-const DROPSHIP_FEE_RATE = 0.039; // ~3.9% processing fee for drop-ship stores
-const SUBS_FEE_RATE = 0.163; // ~16.3% processing fee for PHX subscriptions
+import {
+  SUBSCRIPTION_STORE_IDS as PHX_STORE_IDS,
+  SUBS_FEE_RATE,
+  DROPSHIP_FEE_RATE,
+} from "@/lib/pnl/fees";
 
 export type StoreInfo = {
   id: string;
@@ -442,12 +447,13 @@ export async function loadBlendedDashboardData(
     return true;
   };
   const stores = await loadStores(tenantId);
-  // Subscription stores bill through a ~16.3% processor (client spec Jun 2026);
-  // other scopes use the per-store processing_fee_pct (drop-ship ~3.9%).
-  const feeRate = subsOnly
-    ? SUBS_FEE_RATE
-    : Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? 0.1) ||
-      0.1;
+  // Subscription revenue always bills through the ~16.3% processor (client spec
+  // Jun 2026), in EVERY scope. This used to read
+  // `stores.find(s => s.id !== "PORTFOLIO").processing_fee_pct` — i.e. whichever
+  // store sorted first (a drop-ship store at 2.7%) — and charged that rate on
+  // subscription revenue, which is why the dashboard reported a higher Net
+  // Profit than the Subscriptions page for the same day.
+  const feeRate = SUBS_FEE_RATE;
 
   // Resolve range.
   const today = todayUtc();
@@ -593,17 +599,32 @@ export async function loadBlendedDashboardData(
     // subscription-platform slice only.
     const phxTotal = subs + phx.upsell;
 
-    // PHX stores' contribution = their own Shopify net (checkout revenue −
-    // ad/cogs/fees/refunds, already rolled up in daily_pnl) + the billed
-    // subscription dollars net of processor fees.
-    const phxContribution = phxTotal * (1 - feeRate) + phxShop.net_profit;
-    const nonPhxContribution = nonPhxShop.net_profit;
+    // Processing fees are recomputed here from the client-spec rates rather
+    // than taken from the stored daily_pnl.net_profit, which is computed with
+    // each store's own `processing_fee_pct` (subscription stores sat at 10%,
+    // drop-ship at 2.7–3.0%). Recomputing means every page nets out the same
+    // fee the Fees column displays, so each row foots exactly:
+    //   Total − COGS − Fees − Ad Spend = Net Profit.
+    const nonPhxContribution =
+      nonPhxShop.revenue -
+      nonPhxShop.cogs -
+      nonPhxShop.revenue * DROPSHIP_FEE_RATE -
+      nonPhxShop.ad_spend;
+    // PHX stores: 16.3% applies to their Shopify checkout AND to their billed
+    // subscription revenue (client spec Jun 2026). Their contribution = own
+    // Shopify net + the billed subscription dollars net of the same fee.
+    const phxShopNet =
+      phxShop.revenue -
+      phxShop.cogs -
+      phxShop.revenue * SUBS_FEE_RATE -
+      phxShop.ad_spend;
+    const phxContribution = phxTotal * (1 - feeRate) + phxShopNet;
     const manual = manualByDayCur.get(cur) ?? 0;
     daily.push({
       date: cur,
       shopify_revenue: round2(nonPhxShop.revenue),
       shopify_ad_spend: round2(allShop.ad_spend),
-      shopify_net_profit: round2(nonPhxShop.net_profit),
+      shopify_net_profit: round2(nonPhxContribution),
       shopify_cogs: round2(allShop.cogs),
       shopify_refunds: round2(allShop.refunds),
       phx_revenue: round2(phxTotal),
@@ -621,20 +642,14 @@ export async function loadBlendedDashboardData(
       // Total = every store's Shopify checkout + billed subscription revenue
       // (+ legacy PHX upsell) + manual — same shape as the /pnl ledger.
       total_revenue: round2(allShop.revenue + phxTotal + manual),
-      // Net profit. In subscription scope the processor fee (~16.3%) applies to
-      // the WHOLE Total (Shopify + subscription), per client spec, so we
-      // recompute: Total − COGS − fee(Total) − ad_spend. Otherwise use the
-      // blended contribution (fee only on the subscription slice).
-      total_net_profit: subsOnly
-        ? round2(
-            allShop.revenue +
-              phxTotal +
-              manual -
-              allShop.cogs -
-              (allShop.revenue + phxTotal + manual) * feeRate -
-              allShop.ad_spend,
-          )
-        : round2(nonPhxContribution + phxContribution + manual),
+      // Net profit — ONE formula for every scope. The Dashboard and the
+      // Subscriptions page used to branch here (`subsOnly ? … : …`) and charge
+      // different fee rates on the same day, so the two pages disagreed by
+      // 15–20%. Manual revenue is added whole: it's coaching/consulting, not
+      // card-processed, so no processor fee and no COGS apply to it.
+      total_net_profit: round2(
+        nonPhxContribution + phxContribution + manual,
+      ),
     });
     cur = addDays(cur, 1);
   }
@@ -660,13 +675,24 @@ export async function loadBlendedDashboardData(
     // Same money story as the current loop: billed subs (+ upsell) on top of
     // every store's Shopify checkout net.
     const phxTotalP = subsP + phx.upsell;
-    const phxContribution = phxTotalP * (1 - feeRate) + phxShop.net_profit;
+    // Same recomputed fees as the current loop — see the comment there.
+    const nonPhxContribution =
+      nonPhxShop.revenue -
+      nonPhxShop.cogs -
+      nonPhxShop.revenue * DROPSHIP_FEE_RATE -
+      nonPhxShop.ad_spend;
+    const phxShopNet =
+      phxShop.revenue -
+      phxShop.cogs -
+      phxShop.revenue * SUBS_FEE_RATE -
+      phxShop.ad_spend;
+    const phxContribution = phxTotalP * (1 - feeRate) + phxShopNet;
     const manualP = manualByDayPrior.get(curP) ?? 0;
     priorDaily.push({
       date: curP,
       shopify_revenue: round2(nonPhxShop.revenue),
       shopify_ad_spend: round2(allShop.ad_spend),
-      shopify_net_profit: round2(nonPhxShop.net_profit),
+      shopify_net_profit: round2(nonPhxContribution),
       shopify_orders: frontendOrdersP,
       new_subs: newSubsP,
       upsell_orders: upsellOrdersP,
@@ -680,16 +706,9 @@ export async function loadBlendedDashboardData(
       phx_upsell_revenue: round2(phx.upsell),
       manual_revenue: round2(manualP),
       total_revenue: round2(allShop.revenue + phxTotalP + manualP),
-      total_net_profit: subsOnly
-        ? round2(
-            allShop.revenue +
-              phxTotalP +
-              manualP -
-              allShop.cogs -
-              (allShop.revenue + phxTotalP + manualP) * feeRate -
-              allShop.ad_spend,
-          )
-        : round2(nonPhxShop.net_profit + phxContribution + manualP),
+      total_net_profit: round2(
+        nonPhxContribution + phxContribution + manualP,
+      ),
     });
     curP = addDays(curP, 1);
   }

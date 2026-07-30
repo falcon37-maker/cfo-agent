@@ -75,7 +75,6 @@ export function PnlTableWithRange({ pool }: { pool: BlendedDailyRow[] }) {
       rows={rows}
       rangeControl={control}
       showFees
-      feesMode="split"
     />
   );
 }

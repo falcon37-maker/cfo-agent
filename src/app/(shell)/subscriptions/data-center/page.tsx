@@ -6,6 +6,7 @@ import {
   loadPhxDailyRows,
 } from "@/lib/phx/queries";
 import { loadStores } from "@/lib/pnl/queries";
+import { SUBSCRIPTION_STORE_IDS, SUBS_FEE_RATE } from "@/lib/pnl/fees";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireTenant } from "@/lib/tenant";
 import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
@@ -27,8 +28,7 @@ import {
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Subscriptions · Data Center — CFO Agent" };
 
-const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
-const PHX_FEE_RATE_FALLBACK = 0.1;
+const PHX_STORE_IDS = SUBSCRIPTION_STORE_IDS;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const RANGES: Array<{ id: string; days: number }> = [
   { id: "7d", days: 7 },
@@ -133,9 +133,8 @@ export default async function SubscriptionsDataCenterPage({
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
-  const feeRate =
-    Number(stores.find((s) => s.id !== "PORTFOLIO")?.processing_fee_pct ?? PHX_FEE_RATE_FALLBACK) ||
-    PHX_FEE_RATE_FALLBACK;
+  // Client-spec subscription gateway rate — see @/lib/pnl/fees.
+  const feeRate = SUBS_FEE_RATE;
 
   const [snapshot, phxDays, pnlRows, alertCost] = await Promise.all([
     loadLatestPortfolioSnapshot(tenant.id),

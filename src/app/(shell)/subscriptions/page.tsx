@@ -11,6 +11,7 @@ import {
 } from "@/lib/phx/queries";
 import { loadPaysightSubsByDate } from "@/lib/paysight/queries";
 import { loadStores, loadBlendedDashboardData } from "@/lib/pnl/queries";
+import { SUBSCRIPTION_STORE_IDS, SUBS_FEE_RATE } from "@/lib/pnl/fees";
 import { BlendedPnlTable } from "@/components/dashboard/BlendedPnlTable";
 import { requireTenant } from "@/lib/tenant";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -26,9 +27,7 @@ import { SubsSearchInput } from "@/components/subscriptions/SubsTableSearch";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Subscriptions — CFO Agent" };
 
-const PHX_STORE_IDS = new Set(["NOVA", "NURA", "KOVA"]);
-// Subscription processing fee ~16% of billed revenue (client spec, Jun 2026).
-const SUBS_FEE_RATE = 0.16;
+const PHX_STORE_IDS = SUBSCRIPTION_STORE_IDS;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const RANGES: Array<{ id: string; days: number }> = [
   { id: "7d", days: 7 },
@@ -442,7 +441,6 @@ export default async function SubscriptionsOverviewPage({
       <BlendedPnlTable
         rows={blended.daily}
         showFees
-        feeRate={0.163}
         csvFilename="daily-pnl-blended"
         footerLabel={rangeLabel}
         searchable

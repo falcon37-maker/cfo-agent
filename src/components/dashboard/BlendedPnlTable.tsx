@@ -7,26 +7,21 @@ import { fmtDate, fmtInt, fmtMoney } from "@/lib/format";
 import { TableFooter } from "@/components/subscriptions/TableFooter";
 import { ExportCsvButton } from "@/components/subscriptions/ExportCsvButton";
 import { useSubsSearch } from "@/components/subscriptions/SubsTableSearch";
-
 // Processing-fee rates (client spec Jun 2026):
 //   drop-ship Shopify stores  → 3.9% of their store revenue
 //   subscription (PHX) stores → 16.3% of their total (checkout + subs billed)
-const DROPSHIP_FEE_RATE = 0.039;
-const SUBS_FEE_RATE = 0.163;
+// Imported so this column can never drift from the rates the P&L layer nets out.
+import { DROPSHIP_FEE_RATE, SUBS_FEE_RATE } from "@/lib/pnl/fees";
+
 const PAGE_SIZES = [10, 25, 50, 100];
 
 type Props = {
   rows: BlendedDailyRow[];
   /** Range pills etc — rendered in the card head's right side. */
   rangeControl?: React.ReactNode;
-  /** Show a Fees column. Net Profit already nets out this fee — the column is
-   *  for visibility. */
+  /** Show a Fees column. Net Profit nets out exactly this fee — every row
+   *  foots as Total − COGS − Fees − Ad Spend = Net Profit. */
   showFees?: boolean;
-  /** "total"  → whole Total × feeRate (Subscriptions page; subs stores only).
-   *  "split"  → drop-ship revenue × 3.9% + PHX revenue × 16.3% (main
-   *             Dashboard, which blends both store types). */
-  feesMode?: "total" | "split";
-  feeRate?: number;
   /** When set, renders a Transactions-style footer bar (row count + range
    *  label + Export to CSV + page indicator) below the table. Omit to keep
    *  the bare table (e.g. on the dashboard). */
@@ -40,15 +35,16 @@ type Props = {
   searchable?: boolean;
 };
 
-/** Per-row processing fee. In "split" mode the drop-ship (non-PHX) Shopify
- *  revenue is charged 3.9% and the PHX subscription revenue 16.3%. */
-function rowFee(r: BlendedDailyRow, mode: "total" | "split", rate: number): number {
-  if (mode === "split") {
-    const phxRevenue =
-      r.phx_frontend_revenue + r.phx_subs_revenue + r.phx_upsell_revenue;
-    return r.shopify_revenue * DROPSHIP_FEE_RATE + phxRevenue * SUBS_FEE_RATE;
-  }
-  return r.total_revenue * rate;
+/** Per-row processing fee: drop-ship (non-PHX) Shopify revenue at 3.9%, PHX
+ *  revenue (their checkout + billed subscriptions) at 16.3%. This mirrors
+ *  loadBlendedDashboardData's net-profit maths exactly — there used to be a
+ *  second "whole Total × one rate" mode for the Subscriptions page, which fee'd
+ *  manual revenue the P&L layer never charged. Manual revenue carries no
+ *  processor fee (it isn't card-processed), so it's excluded here too. */
+function rowFee(r: BlendedDailyRow): number {
+  const phxRevenue =
+    r.phx_frontend_revenue + r.phx_subs_revenue + r.phx_upsell_revenue;
+  return r.shopify_revenue * DROPSHIP_FEE_RATE + phxRevenue * SUBS_FEE_RATE;
 }
 
 /** Front-end revenue for a row (PHX Direct+Initial + non-PHX Shopify + upsell).
@@ -65,14 +61,12 @@ export function BlendedPnlTable({
   rows,
   rangeControl,
   showFees = false,
-  feesMode = "total",
-  feeRate = 0,
   csvFilename,
   footerLabel,
   searchable = false,
 }: Props) {
   // Total fees = sum of each row's fee (handles the split rates correctly).
-  const totalFees = rows.reduce((s, r) => s + rowFee(r, feesMode, feeRate), 0);
+  const totalFees = rows.reduce((s, r) => s + rowFee(r), 0);
   // Show newest day first (day-wise descending) regardless of how the data
   // layer ordered the array. Totals are order-independent (a sum).
   const sortedRows = useMemo(
@@ -198,7 +192,7 @@ export function BlendedPnlTable({
       fmtMoney(r.total_revenue),
       fmtMoney(r.shopify_cogs),
       ...(showFees
-        ? [r.total_revenue > 0 ? fmtMoney(rowFee(r, feesMode, feeRate)) : "—"]
+        ? [r.total_revenue > 0 ? fmtMoney(rowFee(r)) : "—"]
         : []),
       fmtMoney(r.shopify_ad_spend),
       r.shopify_ad_spend > 0 ? `${roas.toFixed(2)}x` : "—",
@@ -288,7 +282,7 @@ export function BlendedPnlTable({
                     {showFees ? (
                       <td className="num muted">
                         {r.total_revenue > 0
-                          ? fmtMoney(rowFee(r, feesMode, feeRate))
+                          ? fmtMoney(rowFee(r))
                           : "—"}
                       </td>
                     ) : null}
