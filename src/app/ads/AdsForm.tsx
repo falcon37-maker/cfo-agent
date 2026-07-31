@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Send } from "lucide-react";
+import { Check, Send, ChevronLeft, ChevronRight } from "lucide-react";
 import { StoreSelect, type StoreOption } from "@/components/entry/StoreSelect";
 import { DatePicker } from "@/components/entry/DatePicker";
 import { AmountInput } from "@/components/entry/AmountInput";
@@ -26,6 +26,10 @@ const PLATFORMS = [
   { id: "tiktok", name: "TikTok", color: "#ff4d5e" },
 ];
 
+// History rows per page. Keeps the aside roughly the form's height instead of
+// running 30 rows past the bottom of the page.
+const HISTORY_PAGE_SIZE = 8;
+
 export function AdsForm({
   stores,
   recent,
@@ -44,12 +48,22 @@ export function AdsForm({
   // Must NOT depend on `parsed`, or every keystroke would remount the input and
   // steal focus after a single digit.
   const [resetKey, setResetKey] = useState(0);
+  const [page, setPage] = useState(1);
 
   const storeObj = stores.find((s) => s.id === store);
   const platObj = PLATFORMS.find((p) => p.id === platform);
 
+  // Paginate the history purely client-side — `recent` is already the 30 rows
+  // the server sent, so paging never refetches.
+  const pageCount = Math.max(1, Math.ceil(recent.length / HISTORY_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const sliceStart = (safePage - 1) * HISTORY_PAGE_SIZE;
+  const pageRows = recent.slice(sliceStart, sliceStart + HISTORY_PAGE_SIZE);
+  const showingFrom = recent.length === 0 ? 0 : sliceStart + 1;
+  const showingTo = Math.min(sliceStart + HISTORY_PAGE_SIZE, recent.length);
+
   return (
-    <div className="entry-grid">
+    <div className="entry-grid entry-grid-fill">
       <form
         action={submitAdSpendAction}
         className="card entry-card"
@@ -180,7 +194,7 @@ export function AdsForm({
           </div>
         </div>
 
-        <div className="card">
+        <div className="card entry-history-card">
           <div className="card-head">
             <div>
               <div className="card-title small">History</div>
@@ -189,37 +203,75 @@ export function AdsForm({
               </div>
             </div>
           </div>
-          <table className="pnl-table entry-history">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Store</th>
-                <th className="num">Spend</th>
-                <th className="num" style={{ width: 80 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.length === 0 ? (
+          <div className="entry-history-scroll">
+            <table className="pnl-table entry-history">
+              <thead>
                 <tr>
-                  <td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>
-                    No submissions yet.
-                  </td>
+                  <th>Date</th>
+                  <th>Store</th>
+                  <th className="num">Spend</th>
+                  <th className="num" style={{ width: 80 }}></th>
                 </tr>
-              ) : (
-                recent.map((r) => (
-                  <EntryHistoryRow
-                    key={r.id}
-                    entry={r}
-                    stores={stores}
-                    today={today}
-                    amountName="amount"
-                    editAction={updateAdSpendEntryAction}
-                    deleteAction={deleteAdSpendEntryAction}
-                  />
-                ))
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recent.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>
+                      No submissions yet.
+                    </td>
+                  </tr>
+                ) : (
+                  pageRows.map((r) => (
+                    <EntryHistoryRow
+                      key={r.id}
+                      entry={r}
+                      stores={stores}
+                      today={today}
+                      amountName="amount"
+                      editAction={updateAdSpendEntryAction}
+                      deleteAction={deleteAdSpendEntryAction}
+                    />
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {recent.length > 0 ? (
+            <div className="table-foot entry-history-foot">
+              <div className="table-foot-left">
+                <span className="table-foot-info">
+                  Showing <strong>{showingFrom}–{showingTo}</strong> of{" "}
+                  <strong>{recent.length}</strong>
+                </span>
+              </div>
+              <div className="table-foot-right">
+                <span className="table-foot-chip">
+                  Page {safePage} of {pageCount}
+                </span>
+                <div className="pagination-controls" aria-label="Pagination">
+                  <button
+                    type="button"
+                    className="pg-arrow"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft size={14} strokeWidth={2} />
+                  </button>
+                  <button
+                    type="button"
+                    className="pg-arrow"
+                    disabled={safePage >= pageCount}
+                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                    aria-label="Next page"
+                  >
+                    <ChevronRight size={14} strokeWidth={2} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </aside>
     </div>

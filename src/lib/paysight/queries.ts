@@ -117,6 +117,41 @@ export async function loadPaysightSummary(
   };
 }
 
+/**
+ * Count of currently-active Paysight subscriptions.
+ *
+ * Paysight is a SEPARATE CRM from Phoenix/Solvpath — the Subscriptions page's
+ * "Active Subscribers" card reads its subscriber count from Solvpath's
+ * /customers endpoint, which knows nothing about Paysight. Post-migration
+ * (subs start 2026-05-30) most new subscribers live here, so leaving this out
+ * understated the card badly.
+ *
+ * Counts only genuinely-active subscriptions: `active` is Paysight's own flag,
+ * and FROZEN subscriptions are excluded — those are paused (billing stopped,
+ * not cancelled) so they aren't billing anyone and shouldn't inflate the
+ * headline. `frozen` is nullable, hence `not(is true)` rather than
+ * `eq(false)`, which would silently drop NULL rows.
+ * Uses a HEAD count so a 6k-row table costs one cheap query.
+ *
+ * `storeIds` scopes to specific stores; omit for the whole portfolio.
+ */
+export async function loadPaysightActiveSubscribers(
+  tenantId: string,
+  storeIds?: string[],
+): Promise<number> {
+  const sb = supabaseAdmin();
+  let q = sb
+    .from("paysight_subscriptions")
+    .select("*", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("active", true)
+    .not("frozen", "is", true);
+  if (storeIds && storeIds.length > 0) q = q.in("store_id", storeIds);
+  const { count, error } = await q;
+  if (error) return 0;
+  return count ?? 0;
+}
+
 export type PaysightDaySubs = {
   /** BILLED subscription revenue for the day — successful rebills only
    *  (payment_number >= 1). Newly-acquired checkout orders (cycle 0) are

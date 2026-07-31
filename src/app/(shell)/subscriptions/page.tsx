@@ -9,7 +9,10 @@ import {
   loadPhxDailyRows,
   type PhxSnapshot,
 } from "@/lib/phx/queries";
-import { loadPaysightSubsByDate } from "@/lib/paysight/queries";
+import {
+  loadPaysightSubsByDate,
+  loadPaysightActiveSubscribers,
+} from "@/lib/paysight/queries";
 import { loadStores, loadBlendedDashboardData } from "@/lib/pnl/queries";
 import { SUBSCRIPTION_STORE_IDS, SUBS_FEE_RATE } from "@/lib/pnl/fees";
 import { BlendedPnlTable } from "@/components/dashboard/BlendedPnlTable";
@@ -305,8 +308,15 @@ export default async function SubscriptionsOverviewPage({
   const selectedPhx =
     selected.length === 0 ? phxStores : phxStores.filter((id) => selected.includes(id));
 
-  const [snapshot, phxDays, pnlRows, paysightSubsByDate, blended, churn] =
-    await Promise.all([
+  const [
+    snapshot,
+    phxDays,
+    pnlRows,
+    paysightSubsByDate,
+    blended,
+    churn,
+    paysightActive,
+  ] = await Promise.all([
       loadLatestPortfolioSnapshot(tenant.id),
       loadPhxDailyRows(from, to, selectedPhx, tenant.id),
       loadDailyPnl(from, to, selectedPhx, tenant.id),
@@ -320,6 +330,11 @@ export default async function SubscriptionsOverviewPage({
       ),
       // Cohort-based monthly churn (headline only — full view on /churn).
       computeCohortChurn(tenant.id, { maxCycle: 6 }),
+      // Paysight's own active-subscription count. Portfolio-wide (no store
+      // filter) to match the Phoenix snapshot it sits next to — that one is
+      // PORTFOLIO-only, so scoping just one half to the store chips would put
+      // two different populations in the same card.
+      loadPaysightActiveSubscribers(tenant.id),
     ]);
 
   const ledger = buildLedger(phxDays, pnlRows, paysightSubsByDate);
@@ -369,6 +384,7 @@ export default async function SubscriptionsOverviewPage({
           snapshot={snapshot}
           totals={totals}
           churnPct={churn.monthlyChurnPct}
+          paysightActive={paysightActive}
         />
       ) : (
         <NoSnapshotBanner />
@@ -456,11 +472,20 @@ function KpiStrip({
   snapshot,
   totals,
   churnPct,
+  paysightActive,
 }: {
   snapshot: PhxSnapshot;
   totals: ReturnType<typeof sumLedger>;
   churnPct: number | null;
+  /** Currently-active Paysight subscriptions — a SEPARATE CRM from
+   *  Phoenix/Solvpath, so it has to be added to the snapshot's count. */
+  paysightActive: number;
 }) {
+  // Active Subscribers spans both platforms: Phoenix/Solvpath's portfolio
+  // snapshot + Paysight's own subscription table. Broken out in the sub-label
+  // so it's obvious which CRM each half comes from.
+  const phxActive = Number(snapshot.active_subscribers ?? 0);
+  const totalActive = phxActive + paysightActive;
   // Subscription financials for the selected window (billed revenue only).
   const grossRevenue = totals.revenue;
   const netMargin =
@@ -480,9 +505,9 @@ function KpiStrip({
       />
       <KpiCard
         label="Active Subscribers"
-        value={fmtInt(snapshot.active_subscribers)}
+        value={fmtInt(totalActive)}
         delta={null}
-        deltaLabel="lifetime · as of latest scrape"
+        deltaLabel={`PHX ${fmtInt(phxActive)} · Paysight ${fmtInt(paysightActive)}`}
         spark={[]}
         icon={<Users size={14} strokeWidth={1.75} />}
       />

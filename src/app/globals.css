@@ -2022,6 +2022,40 @@ kbd {
   gap: 14px;
 }
 
+/* Both columns end on the same line. The History card used to render all 30
+   rows, so the aside ran far past the bottom of the form; it's paginated now,
+   and this makes whichever column is shorter grow to match the other — the
+   form's body absorbs the slack, the History card's table area takes it (and
+   scrolls only if a page of rows still doesn't fit). Scoped to the ads page's
+   `entry-grid-fill` so the other entry screens keep their current layout. */
+.entry-grid-fill {
+  align-items: stretch;
+}
+.entry-grid-fill .entry-card {
+  display: flex;
+  flex-direction: column;
+}
+.entry-grid-fill .entry-body {
+  flex: 1 1 auto;
+}
+.entry-grid-fill .entry-aside {
+  min-height: 0;
+}
+.entry-history-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.entry-history-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.entry-history-foot {
+  margin-top: auto;
+}
+
 .preview-card {
   padding: 20px;
   background: linear-gradient(160deg, var(--accent-bg) 0%, transparent 60%), var(--surface);
@@ -2585,6 +2619,11 @@ kbd {
 @media (max-width: 860px) {
   .entry-grid {
     grid-template-columns: 1fr;
+  }
+  /* Single column — nothing to match heights with, so let the History card
+     size to its rows instead of scrolling inside a stretched column. */
+  .entry-grid-fill .entry-history-scroll {
+    overflow-y: visible;
   }
   .entry-nav {
     display: none;
