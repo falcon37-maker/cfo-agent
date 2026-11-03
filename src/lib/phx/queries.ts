@@ -172,17 +172,30 @@ export async function loadPhxDailyRows(
 ): Promise<PhxSnapshot[]> {
   if (storeIds.length === 0) return [];
   const sb = supabaseAdmin();
-  const { data, error } = await sb
-    .from("phx_summary_snapshots")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .in("store_id", storeIds)
-    .gte("range_from", from)
-    .lte("range_to", to);
-  if (error) throw new Error(`loadPhxDailyRows: ${error.message}`);
-  return ((data ?? []) as PhxSnapshot[]).filter(
-    (r) => r.range_from === r.range_to,
-  );
+  // Page through — PostgREST caps a response at 1000 rows (3 stores × ~11
+  // months), past which the oldest days would silently drop. The ordering
+  // matches the (tenant_id, store_id, range_from, range_to) unique key, so
+  // pages are deterministic.
+  const PAGE = 1000;
+  const rows: PhxSnapshot[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await sb
+      .from("phx_summary_snapshots")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .in("store_id", storeIds)
+      .gte("range_from", from)
+      .lte("range_to", to)
+      .order("store_id", { ascending: true })
+      .order("range_from", { ascending: true })
+      .order("range_to", { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`loadPhxDailyRows: ${error.message}`);
+    const page = (data ?? []) as PhxSnapshot[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.filter((r) => r.range_from === r.range_to);
 }
 
 /** All portfolio snapshots ordered newest period first (for a history grid). */

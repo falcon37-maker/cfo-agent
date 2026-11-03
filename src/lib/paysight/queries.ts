@@ -6,6 +6,99 @@
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+function txnBaseQuery(tenantId: string, select: string) {
+  return supabaseAdmin()
+    .from("paysight_transactions")
+    .select(select)
+    .eq("tenant_id", tenantId);
+}
+type TxnQuery = ReturnType<typeof txnBaseQuery>;
+
+const PAGE = 1000;
+/** Days per slice. A week of subscription-store traffic is ~1–2 pages and
+ *  returns in under a second; much wider and the planner can fall back to a
+ *  primary-key walk that hits the statement timeout. */
+const SLICE_DAYS = 7;
+/** Slices in flight per call. Callers often run several loaders in parallel,
+ *  and too many concurrent requests exhaust the Supabase connection pool
+ *  (Cloudflare 522) — keep this small. */
+const SLICE_CONCURRENCY = 3;
+
+function addDaysYmd(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Split inclusive [from, to] into consecutive SLICE_DAYS-long windows. */
+function dateSlices(from: string, to: string): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (let s = from; s <= to; s = addDaysYmd(s, SLICE_DAYS)) {
+    const e = addDaysYmd(s, SLICE_DAYS - 1);
+    out.push([s, e < to ? e : to]);
+  }
+  return out;
+}
+
+/**
+ * Fetch every paysight_transactions row in [from, to] matching `filter`.
+ *
+ * The window is fetched in WEEK-SIZED SLICES (a few in parallel). A single
+ * wide query ordered by `id` and paged with OFFSET makes Postgres walk the
+ * primary key across the whole table; past ~a month that hits the statement
+ * timeout (57014). The old loops ignored the error and just stopped paging, so
+ * wider ranges silently lost Paysight revenue/orders (Oct 26 showed $3,968 of
+ * Subs Rev on the 7d view and $0 on the 31d view). A short slice is served by
+ * the (tenant_id, txn_date) index and stays fast at any range.
+ *
+ * Errors are retried once, then THROWN — a partial result must never render
+ * as if it were the real number.
+ */
+async function fetchPaysightTxns<T>(
+  tenantId: string,
+  from: string,
+  to: string,
+  select: string,
+  filter: (q: TxnQuery) => TxnQuery = (q) => q,
+): Promise<T[]> {
+  const fetchSlice = async ([sFrom, sTo]: [string, string]): Promise<T[]> => {
+    const rows: T[] = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const run = () =>
+        filter(txnBaseQuery(tenantId, select))
+          .gte("txn_date", sFrom)
+          .lte("txn_date", sTo)
+          // Unique-key ordering keeps pagination deterministic within a slice.
+          .order("id", { ascending: true })
+          .range(offset, offset + PAGE - 1);
+      let { data, error } = await run();
+      if (error) {
+        await new Promise((r) => setTimeout(r, 500));
+        ({ data, error } = await run());
+      }
+      if (error) {
+        throw new Error(
+          `paysight_transactions ${sFrom}..${sTo}: ${error.message.slice(0, 200)}`,
+        );
+      }
+      const page = (data ?? []) as T[];
+      rows.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return rows;
+  };
+
+  const slices = dateSlices(from, to);
+  const out: T[] = [];
+  for (let i = 0; i < slices.length; i += SLICE_CONCURRENCY) {
+    const batch = await Promise.all(
+      slices.slice(i, i + SLICE_CONCURRENCY).map(fetchSlice),
+    );
+    for (const rows of batch) out.push(...rows);
+  }
+  return out;
+}
+
 export type PaysightSummary = {
   hasData: boolean;
   activeSubscribers: number;
@@ -30,9 +123,7 @@ export async function loadPaysightSummary(
 ): Promise<PaysightSummary> {
   const sb = supabaseAdmin();
 
-  // Page through — Supabase caps a response at 1000 rows; a multi-week window
-  // exceeds that and would silently drop transactions from the totals.
-  const txns: Array<{
+  const txns = await fetchPaysightTxns<{
     store_id: string | null;
     amount: number | null;
     success: boolean | null;
@@ -40,24 +131,12 @@ export async function loadPaysightSummary(
     charged_back: boolean | null;
     application_id: number | null;
     txn_date: string | null;
-  }> = [];
-  const PAGE = 1000;
-  for (let offset = 0; ; offset += PAGE) {
-    const { data } = await sb
-      .from("paysight_transactions")
-      .select(
-        "store_id, amount, success, refunded, charged_back, application_id, txn_date",
-      )
-      .eq("tenant_id", tenantId)
-      .gte("txn_date", from)
-      .lte("txn_date", to)
-      // Unique-key ordering for deterministic pagination (see note below).
-      .order("id", { ascending: true })
-      .range(offset, offset + PAGE - 1);
-    if (!data || data.length === 0) break;
-    txns.push(...data);
-    if (data.length < PAGE) break;
-  }
+  }>(
+    tenantId,
+    from,
+    to,
+    "store_id, amount, success, refunded, charged_back, application_id, txn_date",
+  );
 
   const { count: activeSubscribers } = await sb
     .from("paysight_subscriptions")
@@ -208,36 +287,27 @@ export async function loadPaysightFrontendOrdersByDate(
   // filter below is skipped for `[]`, silently returning every store's data —
   // which leaked subscription-store rows into drop-ship-only callers.
   if (storeIds && storeIds.length === 0) return new Map();
-  const sb = supabaseAdmin();
-  const rows: Array<{
+  // Day-sliced + id-ordered paging (see fetchPaysightTxns). Ordering by a
+  // UNIQUE key matters: txn_date alone is non-deterministic across page
+  // boundaries and once corrupted the per-day distinct-customer counts.
+  const rows = await fetchPaysightTxns<{
     txn_date: string | null;
     success: boolean | null;
     customer_id: number | null;
     payment_number: number | null;
     application_id: number | null;
-  }> = [];
-  const PAGE = 1000;
-  for (let offset = 0; ; offset += PAGE) {
-    let q = sb
-      .from("paysight_transactions")
-      .select("txn_date, success, customer_id, store_id, payment_number, application_id")
-      .eq("tenant_id", tenantId)
-      .gte("txn_date", from)
-      .lte("txn_date", to)
-      .eq("payment_number", 0) // cycle-0 = at-checkout frontend purchase
-      // Order by a UNIQUE key (id) so pagination is deterministic. Ordering by
-      // txn_date alone is non-deterministic across page boundaries when many
-      // rows share a date — Postgres may repeat or skip rows between pages,
-      // which silently corrupted the per-day distinct-customer counts over wide
-      // windows (e.g. Jun 12 read 86 distinct in a 90-day pull vs 104 correct).
-      .order("id", { ascending: true })
-      .range(offset, offset + PAGE - 1);
-    if (storeIds && storeIds.length) q = q.in("store_id", storeIds);
-    const { data } = await q;
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < PAGE) break;
-  }
+  }>(
+    tenantId,
+    from,
+    to,
+    "txn_date, success, customer_id, store_id, payment_number, application_id",
+    (q) => {
+      q = q
+        .eq("payment_number", 0) // cycle-0 = at-checkout frontend purchase
+        .eq("success", true); // declines never count — skip them server-side
+      return storeIds && storeIds.length ? q.in("store_id", storeIds) : q;
+    },
+  );
 
   // Per day: distinct customers (= new subs) and total successful cycle-0 txns.
   const byDate = new Map<string, { customers: Set<number>; total: number }>();
@@ -276,35 +346,26 @@ export async function loadPaysightSubsByDate(
   // filter below is skipped for `[]`, silently returning every store's data —
   // which leaked subscription-store rows into drop-ship-only callers.
   if (storeIds && storeIds.length === 0) return new Map();
-  const sb = supabaseAdmin();
-  // Page through results — Supabase caps a single response at 1000 rows, and a
-  // multi-week window exceeds that, silently dropping rows (the oldest dates
-  // collapse to near-zero). Loop until a short page signals the end.
-  const rows: Array<{
+  // Day-sliced paging with errors surfaced (see fetchPaysightTxns) — a
+  // silently-truncated read here is what zeroed Subs Rev on wide ranges.
+  const rows = await fetchPaysightTxns<{
     txn_date: string | null;
     amount: number | null;
     success: boolean | null;
     application_id: number | null;
     payment_number: number | null;
-  }> = [];
-  const PAGE = 1000;
-  for (let offset = 0; ; offset += PAGE) {
-    let q = sb
-      .from("paysight_transactions")
-      .select("txn_date, amount, success, application_id, store_id, payment_number")
-      .eq("tenant_id", tenantId)
-      .gte("txn_date", from)
-      .lte("txn_date", to)
-      .gte("payment_number", 1) // billed rebills only — see doc comment
-      // Unique-key ordering for deterministic pagination (see note above).
-      .order("id", { ascending: true })
-      .range(offset, offset + PAGE - 1);
-    if (storeIds && storeIds.length) q = q.in("store_id", storeIds);
-    const { data } = await q;
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < PAGE) break;
-  }
+  }>(
+    tenantId,
+    from,
+    to,
+    "txn_date, amount, success, application_id, store_id, payment_number",
+    (q) => {
+      q = q
+        .gte("payment_number", 1) // billed rebills only — see doc comment
+        .eq("success", true); // ~half of rebill attempts decline; skip them
+      return storeIds && storeIds.length ? q.in("store_id", storeIds) : q;
+    },
+  );
 
   const map = new Map<string, PaysightDaySubs>();
   for (const t of rows) {

@@ -78,15 +78,28 @@ async function loadDailyPnl(
   tenantId: string,
 ): Promise<DailyPnlRow[]> {
   const sb = supabaseAdmin();
-  let q = sb
-    .from("daily_pnl")
-    .select("store_id, date, ad_spend, cogs, fees")
-    .eq("tenant_id", tenantId)
-    .gte("date", from)
-    .lte("date", to);
-  if (storeIds.length > 0) q = q.in("store_id", storeIds);
-  const { data } = await q;
-  return (data ?? []) as DailyPnlRow[];
+  // Paged + error-checked: a silently-truncated or failed read here would
+  // understate the KPI strip's COGS for wide ranges.
+  const PAGE = 1000;
+  const rows: DailyPnlRow[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    let q = sb
+      .from("daily_pnl")
+      .select("store_id, date, ad_spend, cogs, fees")
+      .eq("tenant_id", tenantId)
+      .gte("date", from)
+      .lte("date", to);
+    if (storeIds.length > 0) q = q.in("store_id", storeIds);
+    const { data, error } = await q
+      .order("date", { ascending: true })
+      .order("store_id", { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`loadDailyPnl: ${error.message}`);
+    const page = (data ?? []) as DailyPnlRow[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows;
 }
 
 type LedgerRow = {

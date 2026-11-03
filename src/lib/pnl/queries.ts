@@ -162,17 +162,30 @@ async function loadPnlRowsInRange(
   tenantId: string,
 ): Promise<RawPnlRow[]> {
   const sb = supabaseAdmin();
-  const { data, error } = await sb
-    .from("daily_pnl")
-    .select(
-      "store_id, date, revenue, cogs, fees, refunds, ad_spend, gross_profit, net_profit, margin_pct, order_count",
-    )
-    .eq("tenant_id", tenantId)
-    .gte("date", from)
-    .lte("date", to)
-    .order("date", { ascending: false });
-  if (error) throw new Error(`loadPnlRowsInRange: ${error.message}`);
-  return (data ?? []) as RawPnlRow[];
+  // Page through — PostgREST caps a response at 1000 rows, and callers fetch
+  // the range PLUS the prior period (a 6-month view is already ~1.5k rows), so
+  // a single select would silently drop the oldest days. (store_id, date) is
+  // unique per tenant, which keeps the pages deterministic.
+  const PAGE = 1000;
+  const rows: RawPnlRow[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await sb
+      .from("daily_pnl")
+      .select(
+        "store_id, date, revenue, cogs, fees, refunds, ad_spend, gross_profit, net_profit, margin_pct, order_count",
+      )
+      .eq("tenant_id", tenantId)
+      .gte("date", from)
+      .lte("date", to)
+      .order("date", { ascending: false })
+      .order("store_id", { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`loadPnlRowsInRange: ${error.message}`);
+    const page = (data ?? []) as RawPnlRow[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows;
 }
 
 /** Convenience: last `days` days ending today (UTC). */
@@ -472,7 +485,44 @@ export async function loadBlendedDashboardData(
   // Pull current + prior range's Shopify rows in one query.
   const priorTo = addDays(from, -1);
   const priorFrom = addDays(priorTo, -(days - 1));
-  const allPnlRaw = await loadPnlRowsInRange(priorFrom, to, tenantId);
+  const phxStoreIds = stores
+    .map((s) => s.id)
+    .filter((id) => PHX_STORE_IDS.has(id) && inScope(id));
+  // Every source below is independent — fetch them all in parallel (awaiting
+  // them one by one made a 90-day view take ~25s).
+  const [
+    allPnlRaw,
+    // Per-day per-store PHX rows for both windows. No amortization — each row
+    // already represents one store's actual transactions on one day.
+    phxCur,
+    phxPrior,
+    // Paysight BILLED subscription revenue per day (rebills only — the loader
+    // filters payment_number >= 1). ADDED to Phoenix billed revenue: each
+    // rebill happens on exactly one platform, so no double-count. Cycle-0
+    // checkout charges are newly-acquired store revenue, not Subs Rev.
+    paysightCur,
+    paysightPrior,
+    // Frontend (checkout) order count per day, counted PER CUSTOMER from the
+    // Paysight gateway so upsells (a second charge on the same customer/order)
+    // don't double-count. Client spec Jun 2026.
+    paysightFrontendCur,
+    paysightFrontendPrior,
+    // Manual revenue entries (coaching / consulting / one-offs).
+    manualByDayCur,
+    manualByDayPrior,
+  ] = await Promise.all([
+    loadPnlRowsInRange(priorFrom, to, tenantId),
+    loadPhxDailyRows(from, to, phxStoreIds, tenantId),
+    loadPhxDailyRows(priorFrom, priorTo, phxStoreIds, tenantId),
+    loadPaysightSubsByDate(tenantId, from, to, phxStoreIds),
+    loadPaysightSubsByDate(tenantId, priorFrom, priorTo, phxStoreIds),
+    loadPaysightFrontendOrdersByDate(tenantId, from, to, phxStoreIds),
+    loadPaysightFrontendOrdersByDate(tenantId, priorFrom, priorTo, phxStoreIds),
+    loadManualRevenueByDay(tenantId, from, to),
+    loadManualRevenueByDay(tenantId, priorFrom, priorTo),
+  ]);
+  const phxByDayCur = rollupPhxByDay(phxCur);
+  const phxByDayPrior = rollupPhxByDay(phxPrior);
   // Restrict the Shopify rows to the in-scope stores (subscription scope and/or
   // an explicit store filter), so orders/revenue/ad spend/ROAS reflect them.
   const allPnl =
@@ -482,56 +532,6 @@ export async function loadBlendedDashboardData(
   const curPnl = allPnl.filter((r) => r.date >= from && r.date <= to);
   const priorPnl = allPnl.filter(
     (r) => r.date >= priorFrom && r.date <= priorTo,
-  );
-
-  // Per-day per-store PHX rows for both windows. No amortization — each row
-  // already represents one store's actual transactions on one day.
-  const phxStoreIds = stores
-    .map((s) => s.id)
-    .filter((id) => PHX_STORE_IDS.has(id) && inScope(id));
-  const phxCur = await loadPhxDailyRows(from, to, phxStoreIds, tenantId);
-  const phxPrior = await loadPhxDailyRows(priorFrom, priorTo, phxStoreIds, tenantId);
-  const phxByDayCur = rollupPhxByDay(phxCur);
-  const phxByDayPrior = rollupPhxByDay(phxPrior);
-
-  // Paysight BILLED subscription revenue per day (rebills only — the loader
-  // filters payment_number >= 1). ADDED to Phoenix billed revenue: each
-  // rebill happens on exactly one platform, so no double-count. Cycle-0
-  // checkout charges are newly-acquired store revenue, not Subs Rev.
-  const paysightCur = await loadPaysightSubsByDate(
-    tenantId,
-    from,
-    to,
-    phxStoreIds,
-  );
-  // Frontend (checkout) order count per day, counted PER CUSTOMER from the
-  // Paysight gateway so upsells (a second charge on the same customer/order)
-  // don't double-count. Client spec Jun 2026.
-  const paysightFrontendCur = await loadPaysightFrontendOrdersByDate(
-    tenantId,
-    from,
-    to,
-    phxStoreIds,
-  );
-  const paysightPrior = await loadPaysightSubsByDate(
-    tenantId,
-    priorFrom,
-    priorTo,
-    phxStoreIds,
-  );
-  const paysightFrontendPrior = await loadPaysightFrontendOrdersByDate(
-    tenantId,
-    priorFrom,
-    priorTo,
-    phxStoreIds,
-  );
-
-  // Manual revenue entries (coaching / consulting / one-offs).
-  const manualByDayCur = await loadManualRevenueByDay(tenantId, from, to);
-  const manualByDayPrior = await loadManualRevenueByDay(
-    tenantId,
-    priorFrom,
-    priorTo,
   );
 
   // Split Shopify rows: keep non-PHX-store rows as the revenue source;
